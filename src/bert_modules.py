@@ -35,7 +35,13 @@ class CKYAnalyzer:
             if isinstance(cell, dict) and "candidates" not in cell:
                 text = cell.get("candidate", "")
                 pos = cell.get("pos", [])
-                cell["candidates"] = [{"text": text, "pos": pos}]
+                tokens = cell.get("tokens", [])
+                cell["candidates"] = [{
+                    "text": text,
+                    "candidate": text,
+                    "pos": pos,
+                    "tokens": tokens,
+                }]
 
         for span in range(2, n+1):
             for i in range(1, n-span+2):

@@ -79,6 +79,64 @@ class PatternNode:
 
         helper(self)
         return info
+
+    def get_node_span_info(self) -> List[Tuple[str, str, int, Optional[str]]]:
+        """Return DFS-ordered node identifiers with span lengths.
+
+        Each element is (ident, kind, span_len, pos_tag). ``kind`` is one of
+        "modifier", "variable", "literal", or "parallel". Only modifier and
+        variable nodes consume ``span_len`` bunsetsu.
+        """
+        result: List[Tuple[str, str, int, Optional[str]]] = []
+
+        def dfs(node: PatternNode) -> None:
+            if isinstance(node, SequenceNode):
+                for c in node.elements:
+                    dfs(c)
+                return
+            if isinstance(node, ModifierRepeatNode):
+                ident = f"{node.kind}{node.count}"
+                result.append((ident, "modifier", node.count, None))
+                dfs(node.head)
+                return
+            if isinstance(node, ModifierSingleNode):
+                ident = f"{node.kind}"
+                result.append((ident, "modifier", 1, None))
+                dfs(node.child)
+                dfs(node.head)
+                return
+            if isinstance(node, ModifierParallelNode):
+                ident = f"{node.kind}"
+                result.append((ident, "modifier", 1, None))
+                dfs(node.parallel_block)
+                dfs(node.head)
+                return
+            if isinstance(node, ModifierBlockRepeatNode):
+                ident = f"{node.kind}{node.count}"
+                result.append((ident, "modifier", node.count, None))
+                dfs(node.block)
+                if node.head:
+                    dfs(node.head)
+                return
+            if isinstance(node, VariableNode):
+                ident = f"{node.symbol}{node.index}"
+                result.append((ident, "variable", 1, node.pos_tag))
+                return
+            if isinstance(node, LiteralNode):
+                ident = "".join(node.text_tokens)
+                result.append((ident, "literal", 0, None))
+                return
+            if isinstance(node, ParallelNode):
+                for idx, opt in enumerate(node.options):
+                    if idx > 0:
+                        result.append(("&", "parallel", 0, None))
+                    dfs(opt)
+                return
+            for c in getattr(node, "children", []):
+                dfs(c)
+
+        dfs(self)
+        return result
     
     
     # --------------------------------------------------------------

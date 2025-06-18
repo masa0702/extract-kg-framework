@@ -17,6 +17,7 @@ class MatchResult:
     i: int              # CKY 表の行 (1-based)
     j: int              # CKY 表の列 (1-based)
     variable_mapping: Dict[str, str]
+    node_info: List[tuple] | None = None
 
 
 # ----------------------------------------------------------------------
@@ -43,20 +44,28 @@ class CKYMatcher:
                 for cand in cell.get("candidates", []):
                     res = self._match_candidate(cand)
                     if res:
+                        varmap, info = res
                         matches.append(MatchResult(
-                            cell=cand, i=i, j=j, variable_mapping=res
+                            cell=cand,
+                            i=i,
+                            j=j,
+                            variable_mapping=varmap,
+                            node_info=info,
                         ))
         return matches
 
     # ---------- internal ----------
     # 3 フェーズ（依存ラベル → リテラル → 品詞）で早期退出
-    def _match_candidate(self, cand: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    def _match_candidate(self, cand: Dict[str, Any]) -> Optional[tuple[Dict[str, str], List[tuple]]]:
         if not self._dependency_label_filter(cand):
             return None
         if not self._literal_filter(cand):
             return None
-        varmap = self._pos_and_variable_filter(cand)
-        return varmap  # None なら非一致
+        info = self._pos_and_variable_filter(cand)
+        if info is None:
+            return None
+        varmap = {ident: "".join(tokens) for ident, tokens, kind, pos in info if kind in ("modifier", "variable")}
+        return varmap, info
 
     # --- phase-1 : 依存ラベル本数 ---
     def _dependency_label_filter(self, cand: Dict[str, Any]) -> bool:
@@ -84,28 +93,33 @@ class CKYMatcher:
         return True
 
     # --- phase-3 : 品詞 + 変数割当 ---
-    def _pos_and_variable_filter(self, cand: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        leaves = self._collect_leaves(cand)  # 左→右
+    def _pos_and_variable_filter(self, cand: Dict[str, Any]) -> Optional[List[tuple]]:
+        leaves = self._collect_leaves(cand)
         if not leaves:
             return None
 
-        var_info = self.pattern_ast.get_variable_info()
-        varmap: Dict[str, str] = {}
-        pos = 0
+        node_info = self.pattern_ast.get_node_span_info()
+        idx = 0
+        results: List[tuple] = []  # (ident, tokens, kind, pos_tag)
 
-        for ident, pos_tag, span_len in var_info:
-            if pos + span_len > len(leaves):
-                return None
-            sub_leaves = leaves[pos:pos + span_len]
-            surface = "".join(l.get("candidate") or l.get("text", "") for l in sub_leaves)
-            if pos_tag:
-                leaf_pos = sub_leaves[-1].get("pos", [])
-                if pos_tag not in leaf_pos:
+        for ident, kind, span_len, pos_tag in node_info:
+            tokens: List[str] = []
+            if kind in ("modifier", "variable"):
+                if idx + span_len > len(leaves):
                     return None
-            varmap[ident] = surface
-            pos += span_len
+                for _ in range(span_len):
+                    leaf = leaves[idx]
+                    idx += 1
+                    tokens.extend(leaf.get("tokens") or [leaf.get("candidate") or leaf.get("text", "")])
+                if kind == "variable" and pos_tag:
+                    leaf_pos = leaf.get("pos", [])
+                    if pos_tag not in leaf_pos:
+                        return None
+            results.append((ident, tokens, kind, pos_tag))
 
-        return varmap
+        if idx > len(leaves):
+            return None
+        return results
 
     # ---------- utility ----------
     def _collect_dep_labels(self, node: Dict[str, Any]) -> List[str]:

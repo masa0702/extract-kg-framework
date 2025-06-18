@@ -43,59 +43,50 @@ patterns = [
 ]
 
 
-def post_process(results: list[MatchResult]) -> list[MatchResult]:
-    """Clean raw match results and expand simple parallel constructions."""
+def post_process(results: list[MatchResult]) -> list[tuple[int, int, list[tuple[str, str]]]]:
+    """Finalize node-wise token assignments."""
 
-    def clean_text(text: str) -> str:
-        text = text.strip()
-        text = re.sub(r"[。、]+$", "", text)
-        text = text.replace("および", "").replace("及び", "")
-        if text.endswith("を"):
-            text = text[:-1]
-        return text
+    def finalize(info: list[tuple]) -> list[tuple[str, str]]:
+        data = [[ident, list(tokens), kind, pos] for ident, tokens, kind, pos in info]
+        # 句読点を除去
+        for _, tokens, _, _ in data:
+            while tokens and tokens[-1] in {"。", "、"}:
+                tokens.pop()
+
+        for idx, (ident, tokens, kind, _) in enumerate(data):
+            if ident == "を" and idx > 0:
+                prev = data[idx - 1]
+                if prev[1] and prev[1][-1] == "を":
+                    tokens.append(prev[1].pop())
+            if ident == "&" and idx > 0:
+                prev = data[idx - 1]
+                if prev[1] and prev[1][-1] in {"および", "及び"}:
+                    tokens.append(prev[1].pop())
+            if ident == "する" and idx > 0:
+                prev = data[idx - 1]
+                if prev[1] and prev[1][-1] == "する":
+                    tokens.append(prev[1].pop())
+            # 単独の "および" が末尾に残った場合も削除
+            if kind == "variable" and idx + 1 < len(data) and not (data[idx + 1][0] == "&"):
+                if tokens and tokens[-1] in {"および", "及び"}:
+                    tokens.pop()
+
+        result = []
+        for ident, tokens, kind, pos in data:
+            text = "".join(tokens)
+            if kind == "variable" and pos and "サ変" in pos:
+                text += "する"
+            result.append((ident, text))
+        return result
 
     dedup = []
     seen = set()
     for r in results:
-        mapping = {k: clean_text(v) for k, v in r.variable_mapping.items()}
-
-        # 展開処理: 同じ記号の1番と2番があり、2番が"する"で終わる場合
-        expanded = False
-        for k1 in list(mapping.keys()):
-            m1 = re.match(r"([*#]?\d*[A-Za-z]+)1$", k1)
-            if not m1 or k1 not in mapping:
-                continue
-            base = m1.group(1)
-            k2 = f"{base}2"
-            if k2 in mapping:
-                v1 = mapping[k1]
-                v2 = mapping[k2]
-                if v2.endswith("する") and not v1.endswith("する"):
-                    # 1番は連結、2番はベース記号に
-                    res1_map = mapping.copy()
-                    res1_map[k1] = v1 + "する"
-                    res1_map.pop(k2)
-                    key1 = tuple(sorted(res1_map.items()))
-                    if key1 not in seen:
-                        dedup.append(MatchResult(r.cell, r.i, r.j, res1_map))
-                        seen.add(key1)
-
-                    res2_map = mapping.copy()
-                    res2_map.pop(k1)
-                    res2_map.pop(k2)
-                    res2_map[base] = v2
-                    key2 = tuple(sorted(res2_map.items()))
-                    if key2 not in seen:
-                        dedup.append(MatchResult(r.cell, r.i, r.j, res2_map))
-                        seen.add(key2)
-                    expanded = True
-                    break
-        if not expanded:
-            key = tuple(sorted(mapping.items()))
-            if key not in seen:
-                dedup.append(MatchResult(r.cell, r.i, r.j, mapping))
-                seen.add(key)
-
+        mapping = finalize(r.node_info or [])
+        key = (r.i, r.j, tuple(mapping))
+        if key not in seen:
+            seen.add(key)
+            dedup.append((r.i, r.j, mapping))
     return dedup
 
 
@@ -106,5 +97,6 @@ for sentence, cky_table in tables.items():
         ast = parser.parse(pat)
         matcher = CKYMatcher(ast)
         results = matcher.match_table(cky_table)
-        for r in post_process(results):
-            print(f"{pat}: cell({r.i},{r.j}) -> {r.variable_mapping}")
+        for i, j, mapping in post_process(results):
+            mapping_str = ", ".join(f"{k} = {v}" for k, v in mapping)
+            print(f"{pat}: cell({i},{j}) -> {mapping_str}")
