@@ -14,7 +14,10 @@ from pattern_nodes import (
 )
 from ast_visualizer import visualize_ast
 
-GRAMMAR_FILE = "grammar.lark"
+import os
+
+# Ensure grammar.lark can be found regardless of current working directory
+GRAMMAR_FILE = os.path.join(os.path.dirname(__file__), "grammar.lark")
 
 
 class PatternParser:
@@ -256,33 +259,34 @@ class PatternTransformer(Transformer):
 
 
 # 表示したいパターンを指定
-patterns = [
-    "[X1-名詞]を[Y1-動詞]",
-    "[*1X1]を[Y1]",
-    "[*2X1]を[Y1]",
-    "[X1]&[X2]を[Y1]する",
-    "[*([M1]&[M2])X1]を[Y1]",
-]
+if __name__ == "__main__":
+    patterns = [
+        "[X1-名詞]を[Y1-動詞]",
+        "[*1X1]を[Y1]",
+        "[*2X1]を[Y1]",
+        "[X1]&[X2]を[Y1]する",
+        "[*([M1]&[M2])X1]を[Y1]",
+    ]
 
-parser = PatternParser()
+    parser = PatternParser()
 
-for p in patterns:
-    try:
-        print(f"\n==== パターン: {p} ====")
-        ast = parser.parse(p)
-        # AST構造を表示
-        ast.debug()
-        # フィルタで使う情報を表示
-        print("■ 変数と品詞制約")
-        for symbol, idx, pos in ast.get_variable_constraints():
-            print(f"  {symbol}（{idx}番目）: 品詞={pos}")
-        print("■ 依存ラベル要求")
-        print(f"  {ast.get_dependency_label_requirements()}")
-        print("■ 依存エッジ要求")
-        for from_idx, to_idx, label in ast.get_required_dependency_edges():
-            print(f"  {from_idx}→{to_idx} ({label})")
-        print("■ リテラル要素")
-        literals = ast.get_literal_nodes()
-        print(literals)
-    except Exception as e:
-        print(f"パース失敗: {p}\n  → {e}")
+    for p in patterns:
+        try:
+            print(f"\n==== パターン: {p} ====")
+            ast = parser.parse(p)
+            # AST構造を表示
+            ast.debug()
+            # フィルタで使う情報を表示
+            print("■ 変数と品詞制約")
+            for symbol, idx, pos in ast.get_variable_constraints():
+                print(f"  {symbol}（{idx}番目）: 品詞={pos}")
+            print("■ 依存ラベル要求")
+            print(f"  {ast.get_dependency_label_requirements()}")
+            print("■ 依存エッジ要求")
+            for from_idx, to_idx, label in ast.get_required_dependency_edges():
+                print(f"  {from_idx}→{to_idx} ({label})")
+            print("■ リテラル要素")
+            literals = ast.get_literal_nodes()
+            print(literals)
+        except Exception as e:
+            print(f"パース失敗: {p}\n  → {e}")
