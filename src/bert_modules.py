@@ -35,7 +35,13 @@ class CKYAnalyzer:
             if isinstance(cell, dict) and "candidates" not in cell:
                 text = cell.get("candidate", "")
                 pos = cell.get("pos", [])
-                cell["candidates"] = [{"text": text, "pos": pos}]
+                tokens = cell.get("tokens", [])
+                cell["candidates"] = [{
+                    "text": text,
+                    "candidate": text,
+                    "pos": pos,
+                    "tokens": tokens,
+                }]
 
         for span in range(2, n+1):
             for i in range(1, n-span+2):
@@ -70,7 +76,8 @@ class CKYAnalyzer:
                                         dependency_label = "依存関係"
                             else:
                                 # Heuristic fallback: simple rule based on tokens
-                                if text_A.endswith("を") or text_B.endswith("する"):
+                                clean_B = text_B.rstrip("。").rstrip("、")
+                                if text_A.endswith("を") or clean_B.endswith(("する", "して", "し")):
                                     dependency_label = "項-述語"
                                     pred_result = 1
                                 elif text_A.endswith("な") or text_A.endswith("の"):

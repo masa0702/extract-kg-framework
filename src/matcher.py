@@ -13,10 +13,13 @@ from pattern_nodes import PatternNode
 @dataclass
 class MatchResult:
     """CKY セル 1 件と，AST 変数 → 文節表層 の対応表"""
+
     cell: Dict[str, Any]
-    i: int              # CKY 表の行 (1-based)
-    j: int              # CKY 表の列 (1-based)
+    i: int  # CKY 表の行 (1-based)
+    j: int  # CKY 表の列 (1-based)
     variable_mapping: Dict[str, str]
+    node_info: List[tuple] | None = None
+    start: int | None = None
 
 
 # ----------------------------------------------------------------------
@@ -27,6 +30,7 @@ class CKYMatcher:
     span>1 の CKY セル（cell["candidates"] 内の各候補）に対して
     パターン AST を照合し，合致するものを返す。
     """
+
     # ---------- public ----------
     def __init__(self, pattern_ast: PatternNode) -> None:
         self.pattern_ast = pattern_ast
@@ -41,23 +45,43 @@ class CKYMatcher:
                 if not isinstance(cell, dict):
                     continue
                 for cand in cell.get("candidates", []):
-                    res = self._match_candidate(cand)
-                    if res:
-                        matches.append(MatchResult(
-                            cell=cand, i=i, j=j, variable_mapping=res
-                        ))
-        print(matches)
+                    res_list = self._match_candidate(cand)
+                    if not res_list:
+                        continue
+                    for varmap, info, start in res_list:
+                        matches.append(
+                            MatchResult(
+                                cell=cand,
+                                i=i,
+                                j=j,
+                                variable_mapping=varmap,
+                                node_info=info,
+                                start=start,
+                            )
+                        )
         return matches
 
     # ---------- internal ----------
     # 3 フェーズ（依存ラベル → リテラル → 品詞）で早期退出
-    def _match_candidate(self, cand: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    def _match_candidate(
+        self, cand: Dict[str, Any]
+    ) -> Optional[List[tuple[Dict[str, str], List[tuple], int]]]:
         if not self._dependency_label_filter(cand):
             return None
         if not self._literal_filter(cand):
             return None
-        varmap = self._pos_and_variable_filter(cand)
-        return varmap  # None なら非一致
+        infos = self._pos_and_variable_filter(cand)
+        if infos is None:
+            return None
+        results = []
+        for info, start in infos:
+            varmap = {
+                ident: "".join(tokens)
+                for ident, tokens, kind, pos, _ in info
+                if kind in ("modifier", "variable")
+            }
+            results.append((varmap, info, start))
+        return results
 
     # --- phase-1 : 依存ラベル本数 ---
     def _dependency_label_filter(self, cand: Dict[str, Any]) -> bool:
@@ -85,28 +109,67 @@ class CKYMatcher:
         return True
 
     # --- phase-3 : 品詞 + 変数割当 ---
-    def _pos_and_variable_filter(self, cand: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        leaves = self._collect_leaves(cand)  # 左→右
+    def _pos_and_variable_filter(
+        self, cand: Dict[str, Any]
+    ) -> Optional[List[tuple[list[tuple], int]]]:
+        leaves = self._collect_leaves(cand)
         if not leaves:
             return None
 
-        var_constraints = self.pattern_ast.get_variable_constraints()  # [(sym, idx, pos)]
-        varmap: Dict[str, str] = {}
+        node_info = self.pattern_ast.get_node_span_info()
+        total_span = sum(
+            span for _, kind, span, _ in node_info if kind in ("modifier", "variable")
+        )
+        literal_nodes = ["".join(t) for t, _ in self.pattern_ast.get_literal_nodes()]
 
-        for sym, idx, pos_tag in var_constraints:
-            # get_variable_constraints() は 1-based index
-            leaf_idx = idx - 1
-            if leaf_idx >= len(leaves):
-                return None
-            leaf = leaves[leaf_idx]
-            surface = leaf.get("candidate") or leaf.get("text", "")
-            # 品詞チェック（対角線セルが持つ pos を利用）
-            if pos_tag:
-                leaf_pos = leaf.get("pos", [])
-                if pos_tag not in leaf_pos:
-                    return None
-            varmap[sym] = surface
-        return varmap
+        def pos_match(pos_set: set[str], toks: list[str], tag: str) -> bool:
+            if tag == "名詞":
+                return "NOUN" in pos_set
+            if tag == "動詞":
+                return "VERB" in pos_set or "AUX" in pos_set
+            if tag.startswith("サ変"):
+                if "する" in toks:
+                    return True
+                return "NOUN" in pos_set or "VERB" in pos_set
+            return True
+
+        matches: List[tuple[list[tuple], int]] = []
+        for start in range(len(leaves)):
+            sub_text = "".join(
+                "".join(
+                    leaf.get("tokens")
+                    or [leaf.get("candidate") or leaf.get("text", "")]
+                )
+                for leaf in leaves[start:]
+            )
+            if any(lit not in sub_text for lit in literal_nodes):
+                continue
+            idx = start
+            results: List[tuple] = []  # (ident, tokens, kind, pos_tag, pos_set)
+            ok = True
+            for ident, kind, span_len, pos_tag in node_info:
+                tokens: List[str] = []
+                pos_set: set[str] = set()
+                if kind in ("modifier", "variable"):
+                    if idx + span_len > len(leaves):
+                        ok = False
+                        break
+                    for _ in range(span_len):
+                        leaf = leaves[idx]
+                        idx += 1
+                        tokens.extend(
+                            leaf.get("tokens")
+                            or [leaf.get("candidate") or leaf.get("text", "")]
+                        )
+                        pos_set.update(leaf.get("pos", []))
+                    if kind == "variable" and pos_tag:
+                        if not pos_match(pos_set, tokens, pos_tag):
+                            ok = False
+                            break
+                results.append((ident, tokens, kind, pos_tag, pos_set))
+            if ok and idx <= len(leaves):
+                matches.append((results, start))
+        return matches or None
 
     # ---------- utility ----------
     def _collect_dep_labels(self, node: Dict[str, Any]) -> List[str]:
@@ -124,5 +187,7 @@ class CKYMatcher:
     def _collect_leaves(self, node: Dict[str, Any]) -> List[Dict[str, Any]]:
         """候補部分木の葉（対角線セル辞書）を左→右順で取得"""
         if "left" in node and "right" in node:
-            return self._collect_leaves(node["left"]) + self._collect_leaves(node["right"])
+            return self._collect_leaves(node["left"]) + self._collect_leaves(
+                node["right"]
+            )
         return [node]  # leaf
