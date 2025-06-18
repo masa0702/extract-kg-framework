@@ -46,7 +46,6 @@ class CKYMatcher:
                         matches.append(MatchResult(
                             cell=cand, i=i, j=j, variable_mapping=res
                         ))
-        print(matches)
         return matches
 
     # ---------- internal ----------
@@ -90,22 +89,22 @@ class CKYMatcher:
         if not leaves:
             return None
 
-        var_constraints = self.pattern_ast.get_variable_constraints()  # [(sym, idx, pos)]
+        var_info = self.pattern_ast.get_variable_info()
         varmap: Dict[str, str] = {}
+        pos = 0
 
-        for sym, idx, pos_tag in var_constraints:
-            # get_variable_constraints() は 1-based index
-            leaf_idx = idx - 1
-            if leaf_idx >= len(leaves):
+        for ident, pos_tag, span_len in var_info:
+            if pos + span_len > len(leaves):
                 return None
-            leaf = leaves[leaf_idx]
-            surface = leaf.get("candidate") or leaf.get("text", "")
-            # 品詞チェック（対角線セルが持つ pos を利用）
+            sub_leaves = leaves[pos:pos + span_len]
+            surface = "".join(l.get("candidate") or l.get("text", "") for l in sub_leaves)
             if pos_tag:
-                leaf_pos = leaf.get("pos", [])
+                leaf_pos = sub_leaves[-1].get("pos", [])
                 if pos_tag not in leaf_pos:
                     return None
-            varmap[sym] = surface
+            varmap[ident] = surface
+            pos += span_len
+
         return varmap
 
     # ---------- utility ----------

@@ -70,7 +70,8 @@ class CKYAnalyzer:
                                         dependency_label = "依存関係"
                             else:
                                 # Heuristic fallback: simple rule based on tokens
-                                if text_A.endswith("を") or text_B.endswith("する"):
+                                clean_B = text_B.rstrip("。")
+                                if text_A.endswith("を") or clean_B.endswith("する"):
                                     dependency_label = "項-述語"
                                     pred_result = 1
                                 elif text_A.endswith("な") or text_A.endswith("の"):

@@ -61,6 +61,24 @@ class PatternNode:
                 constraints.append((node.symbol, seq_idx, node.pos_tag))
                 seq_idx += 1
         return constraints
+
+    def get_variable_info(self) -> List[Tuple[str, Optional[str], int]]:
+        """Return (identifier, pos_tag, span_len) for variables in order."""
+        info: List[Tuple[str, Optional[str], int]] = []
+
+        def helper(node: PatternNode, prefix: str = "", span: int = 1):
+            if isinstance(node, ModifierRepeatNode):
+                helper(node.head, prefix + f"{node.kind}{node.count}", span + node.count)
+                return
+            if isinstance(node, VariableNode):
+                ident = prefix + f"{node.symbol}{node.index}"
+                info.append((ident, node.pos_tag, span))
+                return
+            for c in getattr(node, "children", []):
+                helper(c, prefix, 1)
+
+        helper(self)
+        return info
     
     
     # --------------------------------------------------------------
