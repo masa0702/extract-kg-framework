@@ -1,7 +1,15 @@
 import json
 
-from mask_module import MaskRelationDetector
-from dep_bert import DependencyModificationRelationDetector
+try:
+    from mask_module import MaskRelationDetector
+    from dep_bert import DependencyModificationRelationDetector
+    _BERT_AVAILABLE = True
+except Exception:
+    # If transformers/torch is not available, fall back to simple heuristics
+    MaskRelationDetector = None
+    DependencyModificationRelationDetector = None
+    _BERT_AVAILABLE = False
+
 from cky_table import CkyTable
 
 class CKYAnalyzer:
@@ -9,8 +17,15 @@ class CKYAnalyzer:
                  mask_model_path=None,
                  dep_mod_model_path="./output_bert_dependency_ver2.0/final_model",
                 ):
-        self.mask_detector = MaskRelationDetector(model_name=mask_model_path or "tohoku-nlp/bert-base-japanese-v3")
-        self.dep_mod_detector = DependencyModificationRelationDetector(model_path=dep_mod_model_path)
+        if _BERT_AVAILABLE:
+            self.mask_detector = MaskRelationDetector(model_name=mask_model_path or "tohoku-nlp/bert-base-japanese-v3")
+            self.dep_mod_detector = DependencyModificationRelationDetector(model_path=dep_mod_model_path)
+            self.use_model = True
+        else:
+            # Fallback: no external models
+            self.mask_detector = None
+            self.dep_mod_detector = None
+            self.use_model = False
 
     def analyze_cky_table(self, cky_table):
         n = len(cky_table) - 1  # CKY表は0行0列がヘッダなので-1
@@ -19,7 +34,8 @@ class CKYAnalyzer:
             cell = cky_table[i][i]
             if isinstance(cell, dict) and "candidates" not in cell:
                 text = cell.get("candidate", "")
-                cell["candidates"] = [{"text": text}]
+                pos = cell.get("pos", [])
+                cell["candidates"] = [{"text": text, "pos": pos}]
 
         for span in range(2, n+1):
             for i in range(1, n-span+2):
@@ -42,16 +58,24 @@ class CKYAnalyzer:
                             acl_result = 0
                             mod_result = 0
 
-                            dependency_label, particle = self.mask_detector.predict_relation(text_A, text_B)
-                            # print(text_A, text_B)
-                            if dependency_label == "項-述語":
-                                pred_result = 1
-                            elif dependency_label == "連体修飾":
-                                acl_result = 1
+                            if self.use_model:
+                                dependency_label, _ = self.mask_detector.predict_relation(text_A, text_B)
+                                if dependency_label == "項-述語":
+                                    pred_result = 1
+                                elif dependency_label == "連体修飾":
+                                    acl_result = 1
+                                else:
+                                    mod_result, _ = self.dep_mod_detector.predict_relation(text_A, text_B)
+                                    if mod_result == 1:
+                                        dependency_label = "依存関係"
                             else:
-                                mod_result, _ = self.dep_mod_detector.predict_relation(text_A, text_B)
-                                if mod_result == 1:
-                                    dependency_label = "依存関係"
+                                # Heuristic fallback: simple rule based on tokens
+                                if text_A.endswith("を") or text_B.endswith("する"):
+                                    dependency_label = "項-述語"
+                                    pred_result = 1
+                                elif text_A.endswith("な") or text_A.endswith("の"):
+                                    dependency_label = "連体修飾"
+                                    acl_result = 1
 
 
                             # 追加: すべてのペアと判定結果を保存
