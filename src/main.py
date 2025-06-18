@@ -43,7 +43,9 @@ patterns = [
 ]
 
 
-def post_process(results: list[MatchResult]) -> list[tuple[int, int, list[tuple[str, str]]]]:
+def post_process(
+    results: list[MatchResult],
+) -> list[tuple[int, int, list[tuple[str, str]]]]:
     """Finalize node-wise token assignments."""
 
     def finalize(info: list[tuple]) -> list[tuple[str, str]]:
