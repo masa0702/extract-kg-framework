@@ -48,45 +48,106 @@ def post_process(results: list[MatchResult]) -> list[tuple[int, int, list[tuple[
 
     def finalize(info: list[tuple]) -> list[tuple[str, str]]:
         data = [[ident, list(tokens), kind, pos] for ident, tokens, kind, pos in info]
-        # 句読点を除去
-        for _, tokens, _, _ in data:
+
+        # --- cleanup punctuation ---
+        for row in data:
+            tokens = row[1]
             while tokens and tokens[-1] in {"。", "、"}:
                 tokens.pop()
 
+        # --- detach literal tokens from variables ---
         for idx, (ident, tokens, kind, _) in enumerate(data):
-            if ident == "を" and idx > 0:
+            if idx > 0:
                 prev = data[idx - 1]
-                if prev[1] and prev[1][-1] == "を":
+                if ident == "を" and prev[1] and prev[1][-1] == "を":
                     tokens.append(prev[1].pop())
-            if ident == "&" and idx > 0:
-                prev = data[idx - 1]
-                if prev[1] and prev[1][-1] in {"および", "及び"}:
+                if ident == "&" and prev[1] and prev[1][-1] in {"および", "及び"}:
                     tokens.append(prev[1].pop())
-            if ident == "する" and idx > 0:
-                prev = data[idx - 1]
-                if prev[1] and prev[1][-1] == "する":
+                if ident == "する" and prev[1] and prev[1][-1] == "する":
                     tokens.append(prev[1].pop())
-            # 単独の "および" が末尾に残った場合も削除
-            if kind == "variable" and idx + 1 < len(data) and not (data[idx + 1][0] == "&"):
-                if tokens and tokens[-1] in {"および", "及び"}:
+            if kind == "variable" and (idx + 1 >= len(data) or data[idx + 1][0] != "&"):
+                while tokens and tokens[-1] in {"および", "及び"}:
                     tokens.pop()
 
+        # --- merge modifier nodes with following variable ---
+        merged: list[list] = []
+        i = 0
+        while i < len(data):
+            ident, tokens, kind, pos = data[i]
+            if kind == "modifier":
+                mod_tokens = tokens[:]
+                mod_id = ident
+                i += 1
+                while i < len(data) and data[i][2] == "modifier":
+                    mod_id += data[i][0]
+                    mod_tokens.extend(data[i][1])
+                    i += 1
+                if i < len(data) and data[i][2] == "variable":
+                    v_ident, v_tokens, _, v_pos = data[i]
+                    ident = mod_id + v_ident
+                    tokens = mod_tokens + v_tokens
+                    kind = "variable"
+                    pos = v_pos
+                    i += 1
+                else:
+                    ident = mod_id
+                    tokens = mod_tokens
+                merged.append([ident, tokens, kind, pos])
+                continue
+            merged.append([ident, tokens, kind, pos])
+            i += 1
+
+        # --- absorb trailing "する" literals into preceding variables ---
+        final_nodes: list[list] = []
+        i = 0
+        while i < len(merged):
+            ident, tokens, kind, pos = merged[i]
+            if ident == "する" and final_nodes:
+                added = tokens or ["する"]
+                idx = len(final_nodes) - 1
+                while idx >= 0:
+                    node = final_nodes[idx]
+                    if node[2] == "variable":
+                        node[1].extend(added)
+                        idx -= 1
+                        if idx >= 0 and final_nodes[idx][0] == "&":
+                            idx -= 1
+                            continue
+                        break
+                    elif node[0] == "&":
+                        idx -= 1
+                    else:
+                        break
+                i += 1
+                continue
+            final_nodes.append([ident, tokens, kind, pos])
+            i += 1
+
         result = []
-        for ident, tokens, kind, pos in data:
+        for ident, tokens, kind, pos in final_nodes:
+            if kind != "variable":
+                continue
             text = "".join(tokens)
-            if kind == "variable" and pos and "サ変" in pos:
+            if pos and "サ変" in pos and not text.endswith("する"):
                 text += "する"
             result.append((ident, text))
         return result
 
+    def expand(mapping: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
+        y_vars = [(k, v) for k, v in mapping if k.startswith("Y")]
+        if len(y_vars) <= 1:
+            return [mapping]
+        base = [(k, v) for k, v in mapping if not k.startswith("Y")]
+        return [base + [y] for y in y_vars]
+
     dedup = []
     seen = set()
     for r in results:
-        mapping = finalize(r.node_info or [])
-        key = (r.i, r.j, tuple(mapping))
-        if key not in seen:
-            seen.add(key)
-            dedup.append((r.i, r.j, mapping))
+        for mapping in expand(finalize(r.node_info or [])):
+            key = (r.i, r.j, tuple(mapping))
+            if key not in seen:
+                seen.add(key)
+                dedup.append((r.i, r.j, mapping))
     return dedup
 
 
