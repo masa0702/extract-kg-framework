@@ -7,7 +7,7 @@ from cky_table import CkyTable
 class CKYAnalyzer:
     def __init__(self,
                  mask_model_path=None,
-                 dep_mod_model_path="./output_bert_dependency_ver2.0/final_model",
+                 dep_mod_model_path="../models/output_bert_dependency_ver2.0/final_model",
                 ):
         self.mask_detector = MaskRelationDetector(model_name=mask_model_path or "tohoku-nlp/bert-base-japanese-v3")
         self.dep_mod_detector = DependencyModificationRelationDetector(model_path=dep_mod_model_path)
