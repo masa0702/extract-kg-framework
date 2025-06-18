@@ -19,6 +19,7 @@ class MatchResult:
     j: int  # CKY 表の列 (1-based)
     variable_mapping: Dict[str, str]
     node_info: List[tuple] | None = None
+    start: int | None = None
 
 
 # ----------------------------------------------------------------------
@@ -47,7 +48,7 @@ class CKYMatcher:
                     res_list = self._match_candidate(cand)
                     if not res_list:
                         continue
-                    for varmap, info in res_list:
+                    for varmap, info, start in res_list:
                         matches.append(
                             MatchResult(
                                 cell=cand,
@@ -55,6 +56,7 @@ class CKYMatcher:
                                 j=j,
                                 variable_mapping=varmap,
                                 node_info=info,
+                                start=start,
                             )
                         )
         return matches
@@ -63,7 +65,7 @@ class CKYMatcher:
     # 3 フェーズ（依存ラベル → リテラル → 品詞）で早期退出
     def _match_candidate(
         self, cand: Dict[str, Any]
-    ) -> Optional[List[tuple[Dict[str, str], List[tuple]]]]:
+    ) -> Optional[List[tuple[Dict[str, str], List[tuple], int]]]:
         if not self._dependency_label_filter(cand):
             return None
         if not self._literal_filter(cand):
@@ -72,13 +74,13 @@ class CKYMatcher:
         if infos is None:
             return None
         results = []
-        for info in infos:
+        for info, start in infos:
             varmap = {
                 ident: "".join(tokens)
-                for ident, tokens, kind, pos in info
+                for ident, tokens, kind, pos, _ in info
                 if kind in ("modifier", "variable")
             }
-            results.append((varmap, info))
+            results.append((varmap, info, start))
         return results
 
     # --- phase-1 : 依存ラベル本数 ---
@@ -109,7 +111,7 @@ class CKYMatcher:
     # --- phase-3 : 品詞 + 変数割当 ---
     def _pos_and_variable_filter(
         self, cand: Dict[str, Any]
-    ) -> Optional[List[List[tuple]]]:
+    ) -> Optional[List[tuple[list[tuple], int]]]:
         leaves = self._collect_leaves(cand)
         if not leaves:
             return None
@@ -131,7 +133,7 @@ class CKYMatcher:
                 return "NOUN" in pos_set or "VERB" in pos_set
             return True
 
-        matches: List[List[tuple]] = []
+        matches: List[tuple[list[tuple], int]] = []
         for start in range(len(leaves)):
             sub_text = "".join(
                 "".join(
@@ -143,7 +145,7 @@ class CKYMatcher:
             if any(lit not in sub_text for lit in literal_nodes):
                 continue
             idx = start
-            results: List[tuple] = []  # (ident, tokens, kind, pos_tag)
+            results: List[tuple] = []  # (ident, tokens, kind, pos_tag, pos_set)
             ok = True
             for ident, kind, span_len, pos_tag in node_info:
                 tokens: List[str] = []
@@ -164,9 +166,9 @@ class CKYMatcher:
                         if not pos_match(pos_set, tokens, pos_tag):
                             ok = False
                             break
-                results.append((ident, tokens, kind, pos_tag))
+                results.append((ident, tokens, kind, pos_tag, pos_set))
             if ok and idx <= len(leaves):
-                matches.append(results)
+                matches.append((results, start))
         return matches or None
 
     # ---------- utility ----------

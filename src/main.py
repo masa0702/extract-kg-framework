@@ -40,6 +40,10 @@ for sentence, data in json_data.items():
 patterns = [
     "[*1X1]を[Y1]&[Y2]する",
     "[*1X1]を[Y1]する",
+    "[X1]を[Y1]&[Y2]する",
+    "[X1]を[Y1]する",
+    "[*1X1]を[Y1]する",
+    "[X1]を[Y1]",
 ]
 
 
@@ -49,7 +53,10 @@ def post_process(
     """Finalize node-wise token assignments."""
 
     def finalize(info: list[tuple]) -> list[tuple[str, str]]:
-        data = [[ident, list(tokens), kind, pos] for ident, tokens, kind, pos in info]
+        data = [
+            [ident, list(tokens), kind, pos, set(pos_set)]
+            for ident, tokens, kind, pos, pos_set in info
+        ]
 
         # --- cleanup punctuation ---
         for row in data:
@@ -58,7 +65,7 @@ def post_process(
                 tokens.pop()
 
         # --- detach literal tokens from variables ---
-        for idx, (ident, tokens, kind, _) in enumerate(data):
+        for idx, (ident, tokens, kind, _, _) in enumerate(data):
             if idx > 0:
                 prev = data[idx - 1]
                 if ident == "を" and prev[1] and prev[1][-1] == "を":
@@ -75,7 +82,7 @@ def post_process(
         merged: list[list] = []
         i = 0
         while i < len(data):
-            ident, tokens, kind, pos = data[i]
+            ident, tokens, kind, pos, pos_set = data[i]
             if kind == "modifier":
                 mod_tokens = tokens[:]
                 mod_id = ident
@@ -85,25 +92,26 @@ def post_process(
                     mod_tokens.extend(data[i][1])
                     i += 1
                 if i < len(data) and data[i][2] == "variable":
-                    v_ident, v_tokens, _, v_pos = data[i]
+                    v_ident, v_tokens, _, v_pos, v_posset = data[i]
                     ident = mod_id + v_ident
                     tokens = mod_tokens + v_tokens
                     kind = "variable"
                     pos = v_pos
+                    pos_set |= v_posset
                     i += 1
                 else:
                     ident = mod_id
                     tokens = mod_tokens
-                merged.append([ident, tokens, kind, pos])
+                merged.append([ident, tokens, kind, pos, pos_set])
                 continue
-            merged.append([ident, tokens, kind, pos])
+            merged.append([ident, tokens, kind, pos, pos_set])
             i += 1
 
         # --- absorb trailing "する" literals into preceding variables ---
         final_nodes: list[list] = []
         i = 0
         while i < len(merged):
-            ident, tokens, kind, pos = merged[i]
+            ident, tokens, kind, pos, pos_set = merged[i]
             if ident == "する" and final_nodes:
                 added = tokens or ["する"]
                 idx = len(final_nodes) - 1
@@ -122,35 +130,49 @@ def post_process(
                         break
                 i += 1
                 continue
-            final_nodes.append([ident, tokens, kind, pos])
+            final_nodes.append([ident, tokens, kind, pos, pos_set])
             i += 1
 
         result = []
-        for ident, tokens, kind, pos in final_nodes:
+        for ident, tokens, kind, pos, pset in final_nodes:
             if kind != "variable":
                 continue
             text = "".join(tokens)
             if pos and "サ変" in pos and not text.endswith("する"):
                 text += "する"
-            result.append((ident, text))
+            result.append((ident, text, pset))
         return result
 
-    def expand(mapping: list[tuple[str, str]]) -> list[list[tuple[str, str]]]:
-        y_vars = [(k, v) for k, v in mapping if k.startswith("Y")]
+    def expand(mapping: list[tuple[str, str, set]]) -> list[list[tuple[str, str, set]]]:
+        y_vars = [(k, v, p) for k, v, p in mapping if k.startswith("Y")]
         if len(y_vars) <= 1:
             return [mapping]
-        base = [(k, v) for k, v in mapping if not k.startswith("Y")]
+        base = [(k, v, p) for k, v, p in mapping if not k.startswith("Y")]
         return [base + [y] for y in y_vars]
 
-    dedup = []
-    seen = set()
+    if not results:
+        return []
+
+    best: dict[tuple, tuple[int, int, tuple[int, int, list[tuple[str, str, set]]]]] = {}
     for r in results:
+        start = r.start or 0
         for mapping in expand(finalize(r.node_info or [])):
-            key = (r.i, r.j, tuple(mapping))
-            if key not in seen:
-                seen.add(key)
-                dedup.append((r.i, r.j, mapping))
-    return dedup
+            key = tuple((k, v) for k, v, _ in mapping)
+            sym_key = tuple(k for k, _, _ in mapping)
+            def weight(pset: set[str]) -> int:
+                if "NOUN" in pset:
+                    return 2
+                if "VERB" in pset or "AUX" in pset:
+                    return 1
+                return 0
+
+            score = sum(weight(ps) for _, _, ps in mapping)
+            if any(("NOUN" not in ps and "VERB" not in ps) for _, _, ps in mapping):
+                continue
+            cur = best.get(sym_key)
+            if cur is None or score > cur[1] or (score == cur[1] and r.i > cur[2][0]):
+                best[sym_key] = (start, score, (r.i, r.j, mapping))
+    return [val[2] for val in sorted(best.values(), key=lambda x: (x[0], -x[1]))]
 
 
 for sentence, cky_table in tables.items():
@@ -161,5 +183,5 @@ for sentence, cky_table in tables.items():
         matcher = CKYMatcher(ast)
         results = matcher.match_table(cky_table)
         for i, j, mapping in post_process(results):
-            mapping_str = ", ".join(f"{k} = {v}" for k, v in mapping)
+            mapping_str = ", ".join(f"{k} = {v}" for k, v, _ in mapping)
             print(f"{pat}: cell({i},{j}) -> {mapping_str}")
