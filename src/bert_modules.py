@@ -65,7 +65,7 @@ class CKYAnalyzer:
                                 elif dependency_label == "連体修飾":
                                     acl_result = 1
                                 else:
-                                    mod_result, _ = self.dep_mod_detector.predict_relation(text_A, text_B)
+                                    mod_result, _ = self.dep_mod_detector.predict_dependency_relation(text_A, text_B)
                                     if mod_result == 1:
                                         dependency_label = "依存関係"
                             else:
