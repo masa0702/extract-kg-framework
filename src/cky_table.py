@@ -30,23 +30,37 @@ class CkyTable:
         # 対角線に dict形式の文節データを配置
         for index, clause_element in enumerate(clauses_list):
             """
-            clause_element 例:
-            [
-                "1",              # id
-                "技術的な",        # clause_str
-                [1, 4],           # span
-                ["技術的", "な"],  # tokens
-                ["ADJ", "AUX"],   # conf_token_pos
-                [[1, 3], [4, 4]]  # config_token_span
-            ]
+            clause_element は以下いずれかの形式を想定する:
+
+            [clause_str, span, tokens, upos_list, xpos_list, token_span]
+            [clause_str, span, tokens, pos_list, token_span]
+
+            既存のデータとの互換性を保つため、項目数によって判断する。
             """
+
+            surface = clause_element[0]
+            span = clause_element[1]
+            tokens = clause_element[2]
+            if len(clause_element) >= 6:
+                upos_list = clause_element[3]
+                xpos_list = clause_element[4]
+                token_span = clause_element[5]
+            else:
+                # 旧形式: 第4要素に品詞(XPOS 相当) が格納されている
+                upos_list = clause_element[3]
+                xpos_list = clause_element[3]
+                token_span = clause_element[4]
+
             clause_dict = {
                 "id": index + 1,
-                "candidate": clause_element[0],     # 文節文字列
-                "span": clause_element[1],          # [開始, 終了] 等
-                "tokens": clause_element[2],        # [tokens]
-                "pos": clause_element[3],           # [POS tags]
-                "token_span": clause_element[4]     # [token spans]
+                "candidate": surface,
+                "span": span,
+                "tokens": tokens,
+                "upos": upos_list,
+                "xpos": xpos_list,
+                # 互換性のため 'pos' も XPOS を入れておく
+                "pos": xpos_list,
+                "token_span": token_span,
             }
             cky_table_matrix[index + 1][index + 1] = clause_dict
 

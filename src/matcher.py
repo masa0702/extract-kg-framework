@@ -102,7 +102,7 @@ class CKYMatcher:
             surface = leaf.get("candidate") or leaf.get("text", "")
             # 品詞チェック（対角線セルが持つ pos を利用）
             if pos_tag:
-                leaf_pos = leaf.get("pos", [])
+                leaf_pos = leaf.get("xpos") or leaf.get("pos", [])
                 if pos_tag not in leaf_pos:
                     return None
             varmap[sym] = surface
