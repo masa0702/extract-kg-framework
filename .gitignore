@@ -162,7 +162,7 @@ cython_debug/
 #.idea/
 
 # json, csv
-*.json
+# *.json
 *.csv
 
 # prof
