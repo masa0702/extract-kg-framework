@@ -59,7 +59,7 @@ class CkyTable:
                 "upos": upos_list,
                 "xpos": xpos_list,
                 # 互換性のため 'pos' も XPOS を入れておく
-                "pos": xpos_list,
+                # "pos": xpos_list,
                 "token_span": token_span,
             }
             cky_table_matrix[index + 1][index + 1] = clause_dict

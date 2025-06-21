@@ -44,6 +44,8 @@ class DependencyAnalysis():
 
             target_deprel = data["deprel"]
             target_upos = data["upos"]
+            target_xpos = data["xpos"]
+            print(target_xpos)
 
             if value + 1 < json_len:
                 next_sentence = json_data[value + 1]
@@ -57,13 +59,14 @@ class DependencyAnalysis():
             if clause_first_flag:
                 clause_value_st = token_start
                 clause_text += token_text
-                clause_element.append((token_text, (token_start, token_end), target_upos))
+                clause_element.append((token_text, (token_start, token_end), target_upos, target_xpos))
                 if value + 1 == json_len:
                     clause_value_ed = token_end
                     tokens = [element[0] for element in clause_element]
                     upos_list = [element[2] for element in clause_element]
+                    xpos_list = [element[3] for element in clause_element]
                     value_ranges = [element[1] for element in clause_element]
-                    clause_list.append([clause_text, (clause_value_st, clause_value_ed), tokens, upos_list, value_ranges])
+                    clause_list.append([clause_text, (clause_value_st, clause_value_ed), tokens, upos_list, xpos_list, value_ranges])
                     clause_element = []
                     clause_text = ""
                 elif target_upos == "VERB" and target_deprel == "fixed":
@@ -76,9 +79,9 @@ class DependencyAnalysis():
                     else:
                         clause_value_ed = token_end
                         tokens = [element[0] for element in clause_element]
-                        upos_list = [element[2] for element in clause_element]
+                        xpos_list = [element[3] for element in clause_element]
                         value_ranges = [element[1] for element in clause_element]
-                        clause_list.append([clause_text, (clause_value_st, clause_value_ed), tokens, upos_list, value_ranges])
+                        clause_list.append([clause_text, (clause_value_st, clause_value_ed), tokens, upos_list, xpos_list, value_ranges])
                         clause_element = []
                         clause_first_flag = True
                         clause_text = ""
@@ -89,11 +92,12 @@ class DependencyAnalysis():
             elif myutil.check_period(token_text):
                 clause_text += token_text
                 clause_value_ed = token_end
-                clause_element.append((token_text, (token_start, token_end), target_upos))
+                clause_element.append((token_text, (token_start, token_end), target_upos, target_xpos))
                 tokens = [element[0] for element in clause_element]
                 upos_list = [element[2] for element in clause_element]
+                xpos_list = [element[3] for element in clause_element]
                 value_ranges = [element[1] for element in clause_element]
-                clause_list.append([clause_text, (clause_value_st, clause_value_ed), tokens, upos_list, value_ranges])
+                clause_list.append([clause_text, (clause_value_st, clause_value_ed), tokens, upos_list, xpos_list, value_ranges])
                 clause_element = []
                 clause_first_flag = True
                 clause_text = ""
@@ -102,11 +106,12 @@ class DependencyAnalysis():
             elif myutil.check_comma(token_text):
                 clause_text += token_text
                 clause_value_ed = token_end
-                clause_element.append((token_text, (token_start, token_end), target_upos))
+                clause_element.append((token_text, (token_start, token_end), target_upos, target_xpos))
                 tokens = [element[0] for element in clause_element]
                 upos_list = [element[2] for element in clause_element]
+                xpos_list = [element[3] for element in clause_element]
                 value_ranges = [element[1] for element in clause_element]
-                clause_list.append([clause_text, (clause_value_st, clause_value_ed), tokens, upos_list, value_ranges])
+                clause_list.append([clause_text, (clause_value_st, clause_value_ed), tokens, upos_list, xpos_list, value_ranges])
                 clause_element = []
                 clause_first_flag = True
                 clause_text = ""
@@ -114,12 +119,13 @@ class DependencyAnalysis():
             # 記号の処理
             elif target_upos == "DET" and target_deprel == "det":
                 clause_text += token_text
-                clause_element.append((token_text, (token_start, token_end), target_upos))
+                clause_element.append((token_text, (token_start, token_end), target_upos, target_xpos))
                 clause_value_ed = token_end
                 tokens = [element[0] for element in clause_element]
                 upos_list = [element[2] for element in clause_element]
+                xpos_list = [element[3] for element in clause_element]
                 value_ranges = [element[1] for element in clause_element]
-                clause_list.append([clause_text, (clause_value_st, clause_value_ed), tokens, upos_list, value_ranges])
+                clause_list.append([clause_text, (clause_value_st, clause_value_ed), tokens, upos_list, xpos_list, value_ranges])
                 clause_element = []
                 clause_first_flag = True
                 clause_text = ""
@@ -128,20 +134,21 @@ class DependencyAnalysis():
             elif target_upos == "CCONJ" and (target_deprel == "cc" or target_deprel == "advmod"):
                 if next_upos == "ADP" and next_deprel == "fixed":
                     clause_text += token_text
-                    clause_element.append((token_text, (token_start, token_end), target_upos))
+                    clause_element.append((token_text, (token_start, token_end), target_upos, target_xpos))
                     clause_first_flag = False
                 elif myutil.check_comma(next_text):
                     clause_text += token_text
-                    clause_element.append((token_text, (token_start, token_end), target_upos))
+                    clause_element.append((token_text, (token_start, token_end), target_upos, target_xpos))
                     clause_first_flag = False
                 else:
                     clause_text += token_text
-                    clause_element.append((token_text, (token_start, token_end), target_upos))
+                    clause_element.append((token_text, (token_start, token_end), target_upos, target_xpos))
                     clause_value_ed = token_end
                     tokens = [element[0] for element in clause_element]
                     upos_list = [element[2] for element in clause_element]
+                    xpos_list = [element[3] for element in clause_element]
                     value_ranges = [element[1] for element in clause_element]
-                    clause_list.append([clause_text, (clause_value_st, clause_value_ed), tokens, upos_list, value_ranges])
+                    clause_list.append([clause_text, (clause_value_st, clause_value_ed), tokens, upos_list, xpos_list, value_ranges])
                     clause_element = []
                     clause_first_flag = True
                     clause_text = ""
@@ -150,20 +157,21 @@ class DependencyAnalysis():
             elif target_upos == "ADP" and target_deprel == "case":
                 if next_upos == "ADP" and next_deprel == "case":
                     clause_text += token_text
-                    clause_element.append((token_text, (token_start, token_end), target_upos))
+                    clause_element.append((token_text, (token_start, token_end), target_upos, target_xpos))
                     clause_first_flag = False
                 elif myutil.check_comma(next_text):
                     clause_text += token_text
-                    clause_element.append((token_text, (token_start, token_end), target_upos))
+                    clause_element.append((token_text, (token_start, token_end), target_upos, target_xpos))
                     clause_first_flag = False
                 else:
                     clause_text += token_text
-                    clause_element.append((token_text, (token_start, token_end), target_upos))
+                    clause_element.append((token_text, (token_start, token_end), target_upos, target_xpos))
                     clause_value_ed = token_end
                     tokens = [element[0] for element in clause_element]
                     upos_list = [element[2] for element in clause_element]
+                    xpos_list = [element[3] for element in clause_element]
                     value_ranges = [element[1] for element in clause_element]
-                    clause_list.append([clause_text, (clause_value_st, clause_value_ed), tokens, upos_list, value_ranges])
+                    clause_list.append([clause_text, (clause_value_st, clause_value_ed), tokens, upos_list, xpos_list, value_ranges])
                     clause_element = []
                     clause_first_flag = True
                     clause_text = ""
@@ -173,24 +181,25 @@ class DependencyAnalysis():
                 (target_upos == "AUX" and target_deprel in ["aux", "cop"]):
                 if next_upos in ["SCONJ", "AUX"] and next_deprel in ["mark", "aux"]:
                     clause_text += token_text
-                    clause_element.append((token_text, (token_start, token_end), target_upos))
+                    clause_element.append((token_text, (token_start, token_end), target_upos, target_xpos))
                     clause_first_flag = False
                 elif myutil.check_comma(next_text):
                     clause_text += token_text
-                    clause_element.append((token_text, (token_start, token_end), target_upos))
+                    clause_element.append((token_text, (token_start, token_end), target_upos, target_xpos))
                     clause_first_flag = False
                 elif myutil.check_period(next_text):
                     clause_text += token_text
-                    clause_element.append((token_text, (token_start, token_end), target_upos))
+                    clause_element.append((token_text, (token_start, token_end), target_upos, target_xpos))
                     clause_first_flag = False
                 else:
                     clause_text += token_text
-                    clause_element.append((token_text, (token_start, token_end), target_upos))
+                    clause_element.append((token_text, (token_start, token_end), target_upos, target_xpos))
                     clause_value_ed = token_end
                     tokens = [element[0] for element in clause_element]
                     upos_list = [element[2] for element in clause_element]
+                    xpos_list = [element[3] for element in clause_element]
                     value_ranges = [element[1] for element in clause_element]
-                    clause_list.append([clause_text, (clause_value_st, clause_value_ed), tokens, upos_list, value_ranges])
+                    clause_list.append([clause_text, (clause_value_st, clause_value_ed), tokens, upos_list, xpos_list, value_ranges])
                     clause_element = []
                     clause_first_flag = True
                     clause_text = ""
@@ -198,7 +207,7 @@ class DependencyAnalysis():
             # その他の処理
             else:
                 clause_text += token_text
-                clause_element.append((token_text, (token_start, token_end), target_upos))
+                clause_element.append((token_text, (token_start, token_end), target_upos, target_xpos))
                 clause_first_flag = False
 
         return clause_list
@@ -241,7 +250,7 @@ def main():
         "技術的な製品情報を記述および管理する。"
     ]
     depana = DependencyAnalysis()
-    output_filename = "dependency_analysis.json"
+    output_filename = "../data/dependency_analysis.json"
     try:
         with open(output_filename, "r", encoding="utf-8") as f:
             data = json.load(f)
