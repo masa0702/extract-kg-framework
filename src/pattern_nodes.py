@@ -6,7 +6,7 @@ from collections import Counter
 KIND_TO_LABEL = {"*": "連体修飾", "#": "連用修飾"}
 
 class PatternNode:
-    __slots__ = ("children",)
+    __slots__ = ("children", "seq_id") 
     def __init__(self, children: Optional[List[PatternNode]] = None):
         self.children: List[PatternNode] = children or []
         
@@ -49,18 +49,17 @@ class PatternNode:
     # --------------------------------------------------------------
     def get_variable_constraints(self) -> List[Tuple[str, int, Optional[str]]]:
         """
-        AST 内に現れる VariableNode を **左→右の出現順** に列挙し、
-        (シンボル, 0-based 出現インデックス, 品詞タグ or None) のリストを返す。
-
-        例: [("X", 0, "名詞"), ("Y", 1, "動詞")]
+        (シンボル, leaf_idx, 品詞) を左→右順で返す。
+        動的インデックス付与後に呼ぶ前提。
         """
         constraints: List[Tuple[str, int, Optional[str]]] = []
-        seq_idx = 1
         for node in self.walk():
             if isinstance(node, VariableNode):
-                constraints.append((node.symbol, seq_idx, node.pos_tag))
-                seq_idx += 1
+                if node.leaf_idx is None:      # まだ未確定なら失敗扱い
+                    raise ValueError("leaf_idx が未設定の VariableNode があります")
+                constraints.append((node.symbol, node.leaf_idx, node.pos_tag))
         return constraints
+
     
     
     # --------------------------------------------------------------
@@ -112,25 +111,36 @@ class PatternNode:
         return edges
 
 
-    def get_literal_nodes(self, path=None):
-        if path is None:
-            path = []
-        results = []
-        # 自分がLiteralNodeの場合
-        if type(self).__name__ == "LiteralNode":
-            results.append((self.text_tokens, path))
-        elif hasattr(self, "elements"):
-            for i, child in enumerate(self.elements):
-                results.extend(child.get_literal_nodes(path + [i]))
-        elif hasattr(self, "parallel_block"):
-            results.extend(self.parallel_block.get_literal_nodes(path + [0]))
-            results.extend(self.head.get_literal_nodes(path + [1]))
-        elif hasattr(self, "options"):
-            for i, child in enumerate(self.options):
-                results.extend(child.get_literal_nodes(path + [i]))
-        elif hasattr(self, "head"):
-            results.extend(self.head.get_literal_nodes(path + [0]))
-        return results
+    # def get_literal_nodes(self, path=None):
+    #     if path is None:
+    #         path = []
+    #     results = []
+    #     # 自分がLiteralNodeの場合
+    #     if type(self).__name__ == "LiteralNode":
+    #         results.append((self.text_tokens, path))
+    #     elif hasattr(self, "elements"):
+    #         for i, child in enumerate(self.elements):
+    #             results.extend(child.get_literal_nodes(path + [i]))
+    #     elif hasattr(self, "parallel_block"):
+    #         results.extend(self.parallel_block.get_literal_nodes(path + [0]))
+    #         results.extend(self.head.get_literal_nodes(path + [1]))
+    #     elif hasattr(self, "options"):
+    #         for i, child in enumerate(self.options):
+    #             results.extend(child.get_literal_nodes(path + [i]))
+    #     elif hasattr(self, "head"):
+    #         results.extend(self.head.get_literal_nodes(path + [0]))
+    #     return results
+    def get_literal_nodes(self) -> List[Tuple[List[str], Optional[int]]]:
+        """
+        動的インデックス付与後に呼び出すことを前提とし、
+        (text_tokens, leaf_idx) を前順で返す。
+        leaf_idx は LiteralNode.leaf_idx (0-based)。
+        """
+        nodes = []
+        for node in self.walk():
+            if isinstance(node, LiteralNode):
+                nodes.append((node.text_tokens, getattr(node, "leaf_idx", None)))
+        return nodes
 
 
 class SequenceNode(PatternNode):
@@ -147,12 +157,13 @@ class SequenceNode(PatternNode):
 
 
 class VariableNode(PatternNode):
-    __slots__ = ("symbol", "index", "pos_tag")
+    __slots__ = ("symbol", "index", "pos_tag", "leaf_idx")  # ★追加
     def __init__(self, symbol: str, index: int, pos_tag: Optional[str] = None):
         super().__init__([])
-        self.symbol = symbol
-        self.index = index
-        self.pos_tag = pos_tag
+        self.symbol   = symbol
+        self.index    = index          # ← Y1 の “1” などラベル番号
+        self.pos_tag  = pos_tag
+        self.leaf_idx = None           # ★ 実際にマッチした葉の 0-based 位置
 
     def __str__(self):
         tag = f"-{self.pos_tag}" if self.pos_tag else ""
@@ -160,10 +171,11 @@ class VariableNode(PatternNode):
 
 
 class LiteralNode(PatternNode):
-    __slots__ = ("text_tokens",)
+    __slots__ = ("text_tokens", "leaf_idx")                 # ★追加
     def __init__(self, text_tokens: List[str]):
         super().__init__([])
         self.text_tokens = text_tokens
+        self.leaf_idx    = None
 
     def __str__(self):
         return "".join(self.text_tokens)
