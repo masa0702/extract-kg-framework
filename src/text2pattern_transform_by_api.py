@@ -133,12 +133,15 @@ client = OpenAI(
     ),
 )
 
-def ask_gpt(sentence, target_triple):
-    # client = openai.OpenAI(api_key=API_KEY_OPENAI)
-    prompt = build_prompt(sentence, target_triple)
+def ask_gpt(sentence, target_triple, prompt_func=build_prompt):
+    """
+    sentence, target_triple に加え、
+    prompt_func でプロンプト生成関数を指定可能に。
+    """
+    prompt = prompt_func(sentence, target_triple)
     messages = [
         {"role": "system", "content": "あなたは日本語の知識グラフ抽出パターン変換の専門家です。"},
-        {"role": "user", "content": prompt}
+        {"role": "user",   "content": prompt}
     ]
     for attempt in range(RETRY_MAX):
         try:
@@ -171,23 +174,23 @@ response_schema = {
     "target_triple": {"type": "STRING"},
     "pattern": {"type": "STRING"}
 }
-
-def ask_gemini(sentence, target_triple):
-    prompt = build_prompt(sentence, target_triple)
+def ask_gemini(sentence, target_triple, prompt_func=build_prompt):
+    """
+    prompt_func でプロンプト生成関数を選択可能
+    """
+    prompt = prompt_func(sentence, target_triple)
     model = genai.GenerativeModel(
         model_name=MODEL_NAME,
         generation_config=genai.types.GenerationConfig(
             response_mime_type="application/json",
             response_schema=response_schema,
-            temperature=0.0,       # 出力の一貫性重視
-            max_output_tokens=512 # 出力トークン上限
+            temperature=0.0,
+            max_output_tokens=512
         )
     )
     for attempt in range(RETRY_MAX):
         try:
-            # Geminiのgenerate_contentは通常、文字列またはJSONを返す
             response = model.generate_content(prompt)
-            # GeminiではJSONは .text または .candidates[0].text で取得
             response_text = getattr(response, "text", None)
             if response_text is None and hasattr(response, "candidates"):
                 response_text = response.candidates[0].text
@@ -204,11 +207,11 @@ def ask_gemini(sentence, target_triple):
     return {"pattern": "", "error": "API failed or JSON error"}
 
 
-def ask_model(sentence, target_triple):
+def ask_model(sentence, target_triple, prompt_func=build_prompt):
     if MODEL_NAME.startswith("gpt"):
-        return ask_gpt(sentence, target_triple)
+        return ask_gpt(sentence, target_triple, prompt_func)
     elif MODEL_NAME.startswith("gemini"):
-        return ask_gemini(sentence, target_triple)
+        return ask_gemini(sentence, target_triple, prompt_func)
     else:
         raise ValueError("未対応モデル名")
     
