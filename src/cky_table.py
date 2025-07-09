@@ -112,7 +112,7 @@ class CkyTable:
             return
 
         for sentence, data in json_data.items():
-            print(f"\n文: {sentence}")
+            # print(f"\n文: {sentence}")
             clauses_list = data.get("clauses", [])
             cky_table = CkyTable.create_initializing_cky_table(clauses_list)
 

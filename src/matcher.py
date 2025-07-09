@@ -1,8 +1,11 @@
-# matcher.py
 from __future__ import annotations
+import re
+from copy import deepcopy
+
 from dataclasses import dataclass
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional
+
 from pattern_nodes import (
     PatternNode,
     VariableNode,
@@ -11,19 +14,25 @@ from pattern_nodes import (
     ModifierRepeatNode,
     ModifierBlockRepeatNode,
     LiteralNode,
+    ParallelNode,
+    SequenceNode
 )
 
+# ── つなぎ語を検知する正規表現 ──────────────────────────
+CONNECTIVES_REGEX = re.compile(
+    r"(および|及び|ならびに|並びに|かつ|や|と|も|とも|または|あるいは|もしくは|、|，|であり|であり、|そして|され、|され|し、)"
+)
 
 # ----------------------------------------------------------------------
 #  結果構造
 # ----------------------------------------------------------------------
 @dataclass
 class MatchResult:
-    """CKY セル 1 件と，AST 変数 → 文節表層 の対応表"""
-    cell: Dict[str, Any]
-    i: int              # CKY 表の行 (1-based)
-    j: int              # CKY 表の列 (1-based)
+    i: int
+    j: int
     variable_mapping: Dict[str, str]
+    cell: Optional[Dict[str, Any]] = None
+
 
 
 # ----------------------------------------------------------------------
@@ -35,333 +44,453 @@ class CKYMatcher:
     パターン AST を照合し，合致するものを返す。
     """
 
-    def __init__(self, pattern_ast: PatternNode) -> None:
+    def __init__(self, pattern_ast: PatternNode, *, verbose: bool = False) -> None:
         self.pattern_ast = pattern_ast
+        self.verbose = verbose     # ← 追加
+        self._all_vars = list(self._collect_variable_nodes(self.pattern_ast))
 
-    # ---------- public ----------
-    def match_table(self, cky_table: List[List[Any]]) -> List[MatchResult]:
-        """CKY 表全体を走査して合致セルを返す"""
-        matches: List[MatchResult] = []
-        n = len(cky_table) - 1
-        for i in range(1, n + 1):
-            for j in range(i + 1, n + 1):  # span > 1
-                cell = cky_table[i][j]
-                if not isinstance(cell, dict):
+    # -------------------------------------------------------------
+    #  ログ出力（verbose=True のときだけ表示）
+    # -------------------------------------------------------------
+    def _log(self, *msg):
+        if self.verbose:
+            print("[CKYMatcher]", *msg)
+
+    # ------------------------------------------------------------------
+    #  CKY 表全体を走査してパターンに合う variable_mapping を返す
+    #  - list[list[...]] フォーマットにも
+    #  - クラスに .table があるフォーマットにも対応
+    # ------------------------------------------------------------------
+    def match_table(self, cky) -> List[Dict[str, str]]:
+        """
+        Parameters
+        ----------
+        cky : object
+            - `cky.table` が 2D list の CKYTable クラス
+            - あるいは 2D list そのもの
+            いずれにも対応する。
+        Returns
+        -------
+        List[Dict[str, str]]
+            パターンにマッチした variable_mapping のリスト
+        """
+        # ---------- 1) 内部 2D 配列を取り出す ----------
+        if hasattr(cky, "table"):
+            mat = cky.table
+        else:                         # すでに list[list]
+            mat = cky
+
+        # mat[0] は列ヘッダ、mat[i][0] は行ヘッダという前提
+        n = len(mat) - 1              # 文節数
+
+        results: List[Dict[str, str]] = []
+
+        # ---------- 2) span 長が長い方から走査 ----------
+        for span in range(n, 0, -1):          # n, n-1, …, 1
+            for i in range(1, n - span + 2):  # 開始インデックス (1-based)
+                j = i + span - 1              # 終了インデックス
+                cell = mat[i][j]
+
+                # 空セルや整数 0 ヘッダなどはスキップ
+                if not isinstance(cell, dict) or "candidates" not in cell:
+                    continue
+                if not cell["candidates"]:
                     continue
 
-                for cand_idx, cand in enumerate(cell.get("candidates", []), start=1):
-                    print(f"\n=== CKY({i},{j}) 候補 {cand_idx} : '{cand.get('text', '')[:30]}...' ===")
+                # ---------- 3) 中の候補を評価 ----------
+                # matcher.py  match_table 内 「for cand in cell['candidates']」 直後を修正
+                for cand in cell["candidates"]:
+                    mapping = self._match_candidate(cand)
+                    if mapping is not None:
+                        results.append(
+                            MatchResult(i=i, j=j, variable_mapping=mapping, cell=cand)
+                        )
 
-                    res = self._match_candidate(cand)
-                    if res:
-                        print("✅ 最終的にマッチしました")
-                        matches.append(MatchResult(
-                            cell=cand, i=i, j=j, variable_mapping=res
-                        ))
-                    else:
-                        print("❌ マッチしませんでした")
-        print(f"\n==>  合致セル総数: {len(matches)}")
-        return matches
+
+
+        return results
+
+
 
     # ---------- internal ----------
-    # 3 フェーズ（依存ラベル → リテラル → 品詞）で早期退出
+    # -------------------------------------------------------------
+    #  候補セル 1 個を評価
+    # -------------------------------------------------------------
     def _match_candidate(self, cand: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        # 0-A. DFS 出現順 ID を付与
-        self._assign_seq_ids()                 # ★ 追加
+        # ① 直前の評価で付いた leaf_idx をリセット
+        self._clear_leaf_indices(self.pattern_ast)
 
-        # 0-B. 葉インデックスを割り振る
+        # ② 既存処理
+        self._assign_seq_ids()
         leaves = self._collect_leaves(cand)
+
         ok, _, _ = self._assign_dynamic_indices(self.pattern_ast, leaves)
         if not ok:
-            print("  [prep] AST への動的インデックス付与に失敗")
+            self._log("A: dynamic-index failed")
             return None
 
-        # 1) 依存ラベル
         if not self._dependency_label_filter(cand):
-            print("  [phase-1] 依存ラベル要件を満たさず失敗")
+            self._log("B: dependency-label filter failed")
             return None
-        print("  [phase-1] 依存ラベル要件をパス")
-
-        # 2) リテラル
         if not self._literal_filter(cand):
-            print("  [phase-2] リテラル不一致で失敗")
+            self._log("C: literal filter failed")
             return None
-        print("  [phase-2] リテラル一致でパス")
 
-        # 3) 品詞+変数
-        varmap = self._pos_and_variable_filter(cand)
-        if varmap is None:
-            print("  [phase-3] 品詞チェック／変数割当で失敗")
+        res = self._pos_and_variable_filter(cand)
+        if res is None:
+            self._log("D: pos/variable filter failed")
         else:
-            print(f"  [phase-3] 品詞チェックをパス → varmap={varmap}")
-        return varmap
+            self._log("✓ matched", res)
+        return res
 
 
-    # --- phase-1 : 依存ラベル本数 ---
+    # --- phase-1 : 依存ラベル ---
     def _dependency_label_filter(self, cand: Dict[str, Any]) -> bool:
-        required: Dict[str, int] = (
-            self.pattern_ast.get_dependency_label_requirements() or {}
-        )
+        required = self.pattern_ast.get_dependency_label_requirements() or {}
         if not required:
             return True
-        actual_counter = Counter(self._collect_dep_labels(cand))
-        for label, need in required.items():
-            got = actual_counter.get(label, 0)
-            print(f"    ├─ label='{label}': need={need}, got={got}")
-            if got < need:
-                return False
-        return True
-
+        actual = Counter(self._collect_dep_labels(cand))
+        return all(actual.get(lbl, 0) >= need for lbl, need in required.items())
 
     # --- phase-2 : リテラル ---
     def _literal_filter(self, cand: Dict[str, Any]) -> bool:
-        literal_nodes = self.pattern_ast.get_literal_nodes()  # [(tokens, leaf_idx), ...]
+        literal_nodes = self.pattern_ast.get_literal_nodes()
         if not literal_nodes:
             return True
 
         leaves = self._collect_leaves(cand)
-        total_leaves = len(leaves)
-
-        # デバッグ: 葉の中身確認
-        # for k, leaf in enumerate(leaves):
-        #     print(f"      [leaf {k}] {self._collect_text_recursive(leaf)}")
+        total = len(leaves)
 
         for tokens, leaf_idx in literal_nodes:
             lit = "".join(tokens)
-
-            # (A) 位置情報なし → 従来どおり
             if leaf_idx is None:
                 if lit not in cand.get("text", ""):
-                    print(f"    ├─ リテラル '{lit}' が cand_text に未出現 (leaf_idx=None)")
                     return False
                 continue
 
-            # (B) leaf_idx が int / list[int] （**0-based**）
-            idx_list = (
-                [leaf_idx] if isinstance(leaf_idx, int)
-                else leaf_idx if isinstance(leaf_idx, list)
-                else None
-            )
-            if idx_list is None:
-                print(f"    ├─ leaf_idx の型が想定外: {leaf_idx!r}")
+            idx_list = [leaf_idx] if isinstance(leaf_idx, int) else leaf_idx
+            if any(idx < 0 or idx >= total for idx in idx_list):
                 return False
 
-            # 0-based 境界チェック
-            if any(idx < 0 or idx >= total_leaves for idx in idx_list):
-                print(f"    ├─ リテラル '{lit}': leaf_idx {idx_list} が範囲外 (葉数={total_leaves})")
+            concat = "".join(self._collect_text_recursive(leaves[idx])
+                             for idx in idx_list)
+            if lit not in concat:
+                print(f"    ✗ literal '{lit}' not in span[{idx_list}]='{concat}'")
                 return False
-
-            # 指定 leaf 群について再帰連結テキストを生成
-            concat_text = "".join(
-                self._collect_text_recursive(leaves[idx]) for idx in idx_list
-            )
-            if lit not in concat_text:
-                print(f"    ├─ リテラル '{lit}' が leaf{idx_list}='{concat_text}' 内に未出現")
-                return False
-
         return True
 
-
-    # --- phase-3 : 品詞 + 変数割当 ---
+    # --- phase-3 : 品詞 + 変数 ---
     def _pos_and_variable_filter(self, cand: Dict[str, Any]) -> Optional[Dict[str, str]]:
         leaves = self._collect_leaves(cand)
-        if not leaves:
-            return None
-
-        var_constraints = self.pattern_ast.get_variable_constraints()  # [(sym, idx, pos_tag)]
+        var_constraints = self.pattern_ast.get_variable_constraints()
         varmap: Dict[str, str] = {}
-        counter = defaultdict(int)   # ← 追加: 各シンボルの出現回数
+        counter = defaultdict(int)
 
-        for sym, leaf_idx, pos_tag in var_constraints:   # ← idx → leaf_idx
+        for sym, leaf_idx, pos_tag in var_constraints:
             if leaf_idx >= len(leaves):
-                print(f"    ├─ 変数{sym}: leaf_idx={leaf_idx} が葉数={len(leaves)} を超過")
                 return None
-
             leaf = leaves[leaf_idx]
             surface = leaf.get("candidate") or leaf.get("text", "")
 
-            # ---------- 品詞チェック ----------
             if pos_tag:
-                raw_pos = leaf.get("xpos") or leaf.get("pos") or leaf.get("upos") or []
-                flat_pos = []
-                for p in raw_pos:
-                    flat_pos.extend(p if isinstance(p, (list, tuple)) else [p])
-
-                if not any(pos_tag in p for p in flat_pos):
-                    print(f"    ├─ 変数{sym}: pos_tag='{pos_tag}' 未一致 (leaf_pos={flat_pos})")
+                pos_seq = (leaf.get("xpos") or leaf.get("pos") or
+                           leaf.get("upos") or [])
+                flat = [p for seq in pos_seq
+                        for p in (seq if isinstance(seq, (list, tuple)) else [seq])]
+                if not any(pos_tag in p for p in flat):
                     return None
 
-            # ---------- 変数名生成 ----------
             counter[sym] += 1
-            key = f"{sym}{counter[sym]}"   # 例: Y → Y1, Y2 …
-            varmap[key] = surface
-            print(f"    ├─ 変数{key}: '{surface}' を割当 (pos OK)")
+            varmap[f"{sym}{counter[sym]}"] = surface
 
-        return varmap
+        # --- 接続詞・補助動詞の末尾除去 ---
+        def _strip_surface(s: str) -> str:
+            for suf in (
+                "であり、", "であり，", "であり",
+                "である、", "である，", "である",
+                "でもありました", "でもあります",
+                "でもあり、", "でもあり", "でもある",
+                "でも",
+                "でした", "です", "でありました", "であります",
+                "および", "及び", "ならびに", "並びに", "かつ",
+                "や", "と", "とも", "と共に", "または", "あるいは", "もしくは",
+                "、", "，", "でもあります。", "によって"
+            ):
+                if s.endswith(suf):
+                    return s[:-len(suf)]
+            return s
 
+        return {k: _strip_surface(v) for k, v in varmap.items()}
 
     # ---------- utility ----------
     def _collect_dep_labels(self, node: Dict[str, Any]) -> List[str]:
-        """候補部分木を DFS して依存ラベルを列挙"""
         labels = []
-        if "dependency" in node and isinstance(node["dependency"], dict):
+        if isinstance(node, dict) and "dependency" in node:
             lbl = node["dependency"].get("label")
             if lbl:
                 labels.append(lbl)
         for side in ("left", "right"):
-            if side in node and isinstance(node[side], dict):
+            if isinstance(node, dict) and side in node:
                 labels.extend(self._collect_dep_labels(node[side]))
         return labels
 
     def _collect_leaves(self, node: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """候補部分木の葉（対角線セル辞書）を左→右順で取得"""
-        if "left" in node and "right" in node:
-            return self._collect_leaves(node["left"]) + self._collect_leaves(node["right"])
-        return [node]  # leaf
-    
+        if isinstance(node, dict) and "left" in node and "right" in node:
+            return (self._collect_leaves(node["left"]) +
+                    self._collect_leaves(node["right"]))
+        return [node]
+
     def _collect_text_recursive(self, node: Dict[str, Any]) -> str:
-        """ノード以下にある 'text' を left→right 順で連結して返す"""
         if node is None or not isinstance(node, dict):
             return ""
         if "left" in node and "right" in node:
-            return self._collect_text_recursive(node["left"]) + self._collect_text_recursive(node["right"])
+            return (self._collect_text_recursive(node["left"]) +
+                    self._collect_text_recursive(node["right"]))
         return node.get("text", "")
-    
-    # 直後にリテラルがあるかを先読み
-    def _next_literal_tokens(self, parent_children: list, cur_idx: int) -> Optional[str]:
-        if cur_idx + 1 < len(parent_children):
-            nxt = parent_children[cur_idx + 1]
-            if isinstance(nxt, LiteralNode):
-                return "".join(nxt.text_tokens)
-        return None
-
 
     # ------------------------------------------------------------------
-    #  パターン AST を DFS 前順で走査し seq_id を付与
+    #  DFS 前順で seq_id を付与
     # ------------------------------------------------------------------
     def _assign_seq_ids(self) -> None:
         cur = 1
         for node in self.pattern_ast.walk():
-
-            # Variable / 単発・並列修飾
-            if isinstance(node, (VariableNode, ModifierSingleNode, ModifierParallelNode)):
+            if isinstance(node, (VariableNode,
+                                 ModifierSingleNode,
+                                 ModifierParallelNode)):
                 node.seq_id = cur
                 cur += 1
-
-            # 繰返し修飾 *n / #n
             elif isinstance(node, ModifierRepeatNode):
                 node.seq_id = cur
-                cur += node.count                    # n 個飛ばす
-
-            # ブロック修飾は番号を振らない
+                cur += node.count
             elif isinstance(node, ModifierBlockRepeatNode):
                 node.seq_id = None
-
-            # Literal は 1 つ前のノードに含まれる扱い
             elif isinstance(node, LiteralNode):
                 node.seq_id = None
-
-            # その他は番号なし
             else:
                 node.seq_id = None
 
-
     # ------------------------------------------------------------------
-    #  AST へ “その候補の葉順” に合わせて leaf_idx を付与 & ログ出力
+    #  葉インデックスを付与
     # ------------------------------------------------------------------
     def _assign_dynamic_indices(
-        self,
-        node: PatternNode,
-        leaves: List[Dict[str, Any]],
-        leaf_ptr: int = 0,
-        counters: Optional[defaultdict] = None,
-        last_var_idx: Optional[int] = None,
-        parent_children: Optional[list] = None,
-        idx_in_parent: int = -1,
-        depth: int = 0,                       # ← ★ 追加：表示用インデント
+            self,
+            node: PatternNode,
+            leaves: List[Dict[str, Any]],
+            leaf_ptr: int = 0,
+            counters: Optional[defaultdict] = None,
+            last_var_idx: Optional[int] = None,
+            parent_children: Optional[list] = None,
+            idx_in_parent: int = -1,
+            depth: int = 0,
+            parent_node: Optional[PatternNode] = None,   # ← ここを None にする
     ) -> tuple[bool, int, Optional[int]]:
-        """
-        戻り値: (ok, next_leaf_ptr, last_var_idx)
-        ok=False なら下位で割当地に失敗している。
-        """
+
 
         if counters is None:
             counters = defaultdict(int)
 
-        indent = "  " * depth   # 表示用インデント
+        # matcher.py  内 _assign_dynamic_indices() より
+        # -------------- ParallelNode --------------
+        elif isinstance(node, ParallelNode):
+            import itertools
 
-        # ---------- ここで訪問ログ ----------
-        name_tag = ""
+            # ---------- permutation を総当たり ----------
+            for perm in itertools.permutations(node.options):
+                snap = self._snapshot(leaf_ptr, counters)
+                lp_tmp, last_tmp = leaf_ptr, last_var_idx
+                success = True
+
+                for opt in perm:
+                    ok, lp_tmp, last_tmp = self._assign_dynamic_indices(
+                        opt, leaves, lp_tmp, counters, node, parent_children, idx_in_parent
+                    )
+                    if not ok:
+                        success = False
+                        break
+
+                if success:
+                    leaf_ptr, last_var_idx = lp_tmp, last_tmp
+                    break  # ← マッチ成功
+                else:
+                    leaf_ptr = self._restore(snap, counters)
+            else:
+                return False, leaf_ptr, last_var_idx
+
+        
+        # -------------- Modifier*Node --------------
+        elif isinstance(node, (ModifierSingleNode,
+                            ModifierRepeatNode,
+                            ModifierBlockRepeatNode)):
+            # min_times, max_times のチェックは count==1 だけ実装
+            # *1 なので必ず 1 回 child をマッチさせる
+            child = node.child if hasattr(node, "child") else None
+            if child is None:
+                # RepeatBlock の場合は children list
+                children = node.children
+            else:
+                children = [child]
+
+            saved = self._snapshot(leaf_ptr, counters)
+            for ch in children:
+                ok, leaf_ptr, last_var_idx = self._assign_dynamic_indices(
+                    ch, leaves, leaf_ptr, counters,
+                    node, children, 0  # idx_in_parent は 0 で OK
+                )
+                if not ok:
+                    leaf_ptr = self._restore(saved, counters)
+                    return False, leaf_ptr, last_var_idx
+            # === 追加ここから ===
+            # 子ども側から帰ってきた last_var_idx が int でなければ
+            # 親側の last_var_idx を保持（上書きしない）
+            if not isinstance(last_var_idx, int):
+                last_var_idx = saved[1]   # snap に保存していた leaf_ptr が int
+            # === 追加ここまで ===
+            return True, leaf_ptr, last_var_idx
+        
+        
+        # ---------- ModifierRepeatNode (‘*’) ----------
+        if isinstance(node, ModifierRepeatNode) and node.kind == "*":
+            orig_ptr = leaf_ptr
+            for rep in range(0, min(node.count, 5) + 1):
+                cur_ptr = orig_ptr
+                ok = True
+                for _ in range(rep):
+                    ok, cur_ptr, last_var_idx = self._assign_dynamic_indices(
+                        node.head, leaves, cur_ptr, counters, last_var_idx,
+                        parent_children=[node.head], idx_in_parent=0,
+                        depth=depth + 1,parent_node=node)
+                    if not ok:
+                        break
+                if ok:
+                    leaf_ptr = cur_ptr
+                    # --- 追加 ---
+                    if not isinstance(last_var_idx, int):
+                        last_var_idx = orig_ptr
+                    # ------------
+
+                    return True, leaf_ptr, last_var_idx
+            return False, leaf_ptr, last_var_idx
+
+    # -------------------------------------------------------------
+    #  VariableNode で leaf を割り当てる部分
+    # -------------------------------------------------------------
+        # ---------- VariableNode ----------
         if isinstance(node, VariableNode):
-            name_tag = f"{node.symbol}{node.index}"
-        elif isinstance(node, LiteralNode):
-            name_tag = '"' + "".join(node.text_tokens) + '"'
-
-        ntype = node.__class__.__name__
-        print(f"{indent}→ visit {ntype} {name_tag} (leaf_ptr={leaf_ptr})")
-
-        # ---------- 変数ノード ----------
-        if isinstance(node, VariableNode):
-            # 直後にリテラルがあれば取得
-            want_literal = None
-            if parent_children and idx_in_parent + 1 < len(parent_children):
-                nxt = parent_children[idx_in_parent + 1]
-                if isinstance(nxt, LiteralNode):
-                    want_literal = "".join(nxt.text_tokens)
+            # すでに leaf が確定していれば再利用して次へ
+            if node.leaf_idx is not None:
+                self._log(f"reuse {node.symbol}{node.index} -> leaf[{node.leaf_idx}]")
+                return True, leaf_ptr, last_var_idx
 
             while leaf_ptr < len(leaves):
-                pos_seq = (
-                    leaves[leaf_ptr].get("xpos")
-                    or leaves[leaf_ptr].get("pos")
-                    or leaves[leaf_ptr].get("upos")
-                    or []
-                )
-                flat = [p for ps in pos_seq for p in (ps if isinstance(ps, (list, tuple)) else [ps])]
-                if node.pos_tag and not any(node.pos_tag in p for p in flat):
-                    leaf_ptr += 1
-                    continue
+                cur_text = self._collect_text_recursive(leaves[leaf_ptr])
 
-                # want_literal がある場合は同一葉に含むことを要求
-                if want_literal and want_literal not in self._collect_text_recursive(leaves[leaf_ptr]):
+                # Parallel 左辺なら接続詞を要求
+                in_parallel = isinstance(parent_node, ParallelNode)
+                if in_parallel and parent_children and idx_in_parent < len(parent_children) - 1:
+                    if CONNECTIVES_REGEX.search(cur_text) is None:
+                        self._log(f"skip leaf[{leaf_ptr}]='{cur_text}' (no connective)")
+                        leaf_ptr += 1
+                        continue
+
+                # pos_tag 条件
+                if node.pos_tag:
+                    pos_seq = (leaves[leaf_ptr].get("xpos")
+                               or leaves[leaf_ptr].get("pos")
+                               or leaves[leaf_ptr].get("upos") or [])
+                    flat = [p for seq in pos_seq
+                            for p in (seq if isinstance(seq, (list, tuple)) else [seq])]
+                    if not any(node.pos_tag in p for p in flat):
+                        self._log(f"skip leaf[{leaf_ptr}]='{cur_text}' (pos_tag mismatch)")
+                        leaf_ptr += 1
+                        continue
+
+                # 直後 Literal 要件
+                want_literal = None
+                if isinstance(parent_node, SequenceNode):
+                    if idx_in_parent + 1 < len(parent_children):
+                        nxt = parent_children[idx_in_parent + 1]
+                        if isinstance(nxt, LiteralNode):
+                            want_literal = "".join(nxt.text_tokens)
+                if want_literal and want_literal not in cur_text:
+                    self._log(f"skip leaf[{leaf_ptr}]='{cur_text}' (want_literal '{want_literal}')")
                     leaf_ptr += 1
                     continue
 
                 # --- 採用 ---
                 node.leaf_idx = leaf_ptr
-                counters[node.symbol] += 1
+                self._log(f"assign {node.symbol}{node.index} -> leaf[{leaf_ptr}]='{cur_text}'")
                 last_var_idx = leaf_ptr
-                print(f"{indent}   ↳ set {node.symbol}{counters[node.symbol]}  leaf_idx={node.leaf_idx}")
-
                 leaf_ptr += 1
                 break
             else:
+                self._log(f"fail: cannot assign {node.symbol}{node.index}")
                 return False, leaf_ptr, last_var_idx
 
-        # ---------- リテラルノード ----------
+
+        # ---------- LiteralNode ----------
         elif isinstance(node, LiteralNode):
             lit = "".join(node.text_tokens)
-            if last_var_idx is not None and lit in self._collect_text_recursive(leaves[last_var_idx]):
-                node.leaf_idx = last_var_idx
-            else:
-                if lit not in self._collect_text_recursive(leaves[leaf_ptr]):
-                    return False, leaf_ptr, last_var_idx
+
+            # --- ① 直前の変数 leaf を優先 ---
+            if last_var_idx is not None:
+                if 0 <= last_var_idx < len(leaves):         # ★ 安全チェックを追加 ★
+                    if lit in self._collect_text_recursive(leaves[last_var_idx]):
+                        node.leaf_idx = last_var_idx
+                        return True, leaf_ptr, last_var_idx
+                # インデックスが不正なら無視して次へ
+
+            # --- ② 現在の leaf_ptr を確認 ---
+            if leaf_ptr < len(leaves) and lit in self._collect_text_recursive(leaves[leaf_ptr]):
                 node.leaf_idx = leaf_ptr
-            print(f"{indent}   ↳ set Literal({lit}) leaf_idx={node.leaf_idx}")
-            # leaf_ptr は進めない（次のノードが同葉を使う可能性）
+                return True, leaf_ptr, last_var_idx
+
+            return False, leaf_ptr, last_var_idx
+
 
         # ---------- その他ノード ----------
         for idx, child in enumerate(getattr(node, "children", [])):
             ok, leaf_ptr, last_var_idx = self._assign_dynamic_indices(
-                child,
-                leaves,
-                leaf_ptr,
-                counters,
-                last_var_idx,
+                child, leaves, leaf_ptr, counters, last_var_idx,
                 parent_children=getattr(node, "children", []),
-                idx_in_parent=idx,
-                depth=depth + 1,                         # ★ 深さを +1
-            )
+                idx_in_parent=idx, depth=depth + 1,parent_node=node)
             if not ok:
                 return False, leaf_ptr, last_var_idx
 
         return True, leaf_ptr, last_var_idx
+
+    # -------------------------------------------------------------
+    #  leaf_idx を再帰的にクリア
+    # -------------------------------------------------------------
+    def _clear_leaf_indices(self, node: PatternNode):
+        if isinstance(node, VariableNode):
+            node.leaf_idx = None
+        for child in getattr(node, "children", []):
+            self._clear_leaf_indices(child)
+
+    # ---------------------------------------------------------
+    #  変数ノード一覧を事前に集めておく  (__init__ の末尾で呼び出し)
+    # ---------------------------------------------------------
+    def _collect_variable_nodes(self, node):
+        from pattern_nodes import VariableNode
+        if isinstance(node, VariableNode):
+            yield node
+        for ch in getattr(node, "children", []):
+            yield from self._collect_variable_nodes(ch)
+
+    # ---------------------------------------------------------
+    #  スナップショットを取得
+    # ---------------------------------------------------------
+    def _snapshot(self, leaf_ptr, counters):
+        leaf_indices = [n.leaf_idx for n in self._all_vars]
+        return (leaf_indices, leaf_ptr, deepcopy(counters))
+
+    # ---------------------------------------------------------
+    #  スナップショットから復元
+    # ---------------------------------------------------------
+    def _restore(self, snap, counters):
+        leaf_indices, lp_saved, ctr_saved = snap
+        for n, idx in zip(self._all_vars, leaf_indices):
+            n.leaf_idx = idx
+        counters.clear()
+        counters.update(ctr_saved)
+        return lp_saved          # ← 呼び出し側で leaf_ptr に代入
