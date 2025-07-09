@@ -23,10 +23,13 @@ output_dir = "./results"
 log_dir = "./logs"
 
 # ===== モデル切り替え =====
+# MODEL_NAME = "gpt-4.1-nano"
+# MODEL_NAME = "gpt-4.1-mini"
 MODEL_NAME = "gpt-4o-mini"
+# MODEL_NAME = "gemini-2.0-flash"
 
-INPUT_CSV = os.path.join(input_dir, f"text_to_pattern_eval_20_ver4.0.csv")
-OUTPUT_CSV = os.path.join(output_dir, f"result_text_to_pattern_eval_20_{MODEL_NAME}_ver4.5.csv")
+INPUT_CSV = os.path.join(input_dir, f"test.csv")
+OUTPUT_CSV = os.path.join(output_dir, f"test_{MODEL_NAME}.csv")
 
 
 RPM_LIMIT = 15
@@ -37,6 +40,7 @@ SLEEP_TIME = 60 / RPM_LIMIT + 0.2
 
 pattern_manual = """
 【パターン記述法】
+前提：パターン記述記号は文節単位で記述する
 ・[Xi]：目的語主辞要素
 ・[Yi]：述語主辞要素
 ・[Mi]：修飾語
@@ -62,11 +66,11 @@ clause_defintion = """
 ・「接頭辞＋自立語＋付属語・接尾辞」
 ・0個以上の接頭辞、付属語・接尾辞
 ・複合名詞などでは自立語が複数の場合もある
+上記に従って、GiNZAの文節境界を採用します。
 """
 
 fewshot_examples = """
 【text->パターンへの変換例】
-※ ｜は文節の定義に沿った区切り。実際の入力文に文節の区切りは記載されていない。
 - 「入力文」->(述語,目的語),..., -> パターン
 【正例】
 - 【正例】「仕事を分担する」->(分担する,仕事)-> [X1-名詞]を[Y1-サ変]する
@@ -75,6 +79,7 @@ fewshot_examples = """
 - 【正例】「果物をゆっくりと切る」->(ゆっくりと切る,果物)-> [X1]を[#1Y1-動詞]
 - 【正例】「危険と安心を確認する」->(確認する,危険),(確認する,安心)-> [X1]&[X2]を[Y1-サ変]する
 - 【正例】「責任を整理、確認する」->(整理する,責任),(確認する,責任)-> [X1]を[Y1-サ変]&[Y2-サ変]する
+- 【正例】「従量課金制に設定し、2500円の収益を得る」->(設定,従量課金制),(収益,2500円)-> [X1]に[Y1-サ変]し[X2]の[Y2-名詞]
 - 【正例】「会社の給料や通勤時間を比べる」->(比べる,会社の給料),(比べる,通勤時間)-> [*1X1]&[X2]を[Y1]
 - 【正例】「エンジニアと営業の責任を知る」->(知る,エンジニアの責任),(知る,営業の責任)-> [*([M1]&[M2])X1]を[Y1]
 - 【正例】「会社のエンジニアと営業の責任を知る」->(知る,会社のエンジニアの責任),(知る,会社の営業の責任)-> [*1*([M1]&[M2])X1]を[Y1]
@@ -90,7 +95,7 @@ fewshot_examples = """
 """
 
 
-def build_prompt(sentence, target_triple):
+def build_make_pattern_prompt(sentence, target_triple):
     prompt = (
         "あなたは日本語テキストから指定された知識グラフ (KG) の述語・目的語ペアを抽出し、以下で定義する【パターン記述法】に従って文を記号パターンへ変換する専門家です。\n"
         "【入力文】と入力文から【抽出したい知識グラフTriple】を提示するので、パターンに変換してください。"
@@ -98,6 +103,8 @@ def build_prompt(sentence, target_triple):
         + clause_defintion + "\n"
         + fewshot_examples + "\n"
         "【注意・確認点】：変数, 修飾子, 品詞指定, リテラル以外のまとまりは必ず[]で囲むこと\n"
+        "以下に指定したTripleだけを抽出するパターンを３つ作成し、その中から一番適切なパターンを決めること\n"
+        "指定したTripleによっては文の一部分だけのパターンを作ることになります。\n"
         f"【入力文】：\n{sentence}\n"
         f"【抽出したい知識グラフTriple】：\n{target_triple}\n"
         "【出力】\n"
@@ -111,13 +118,49 @@ def build_prompt(sentence, target_triple):
     return prompt
 
 
+def plastic_pattern_prompt(sentence, target_triple, pattern):
+    prompt = (
+        "あなたは日本語テキストから指定された知識グラフ (KG) のパターンを文の構造に合わせて調整するスペシャリストです。\n"
+        "【入力文】と入力文から【抽出したい知識グラフTriple】を考慮したパターンが文の構造的に合っているかを確認し、文の構造と差異があればパターンのリテラル（文字列）を調整してください。\n"
+        "抽出対象によっては、文の全てがパターンになっていない場合があります。パターンに該当する部分だけを調整してください。\n"
+        "[]で囲まれているところ以外を調整してください。\n"
+        "勝手に[]の要素を増やしたり、[]の中身を変えないでください。\n"
+        "【確認点】：\n"
+        "・パターンに含まれるリテラル（文字列）が文に含まれていること\n"
+        "・パターンが抽出したい知識グラフTriple以外を対象にしていないこと\n"
+        "以下に指定したパターンの文字列部分（[]で囲まれていない部分）を調整すること\n"
+        "【調整例】\n"
+        "調整例の正例・負例を以下に示します。\n"
+        "対象文->抽出Triple(述語,目的語)->パターン->調整後パターン\n"
+        "【正例】\n"
+        "明日の予定を確認する->(確認する,明日の予定)->[*1X1]を[Y1-サ変]する->[*1X1]を[Y1-サ変]する\n"
+        "私は放課後に晩御飯を調理し、明日の朝食を考える->(作り,晩御飯)(考える,明日の朝食)->[X1]が[Y1-サ変]し、[*1X2]に[Y2]->[X1]を[Y1-サ変]し、[*1X2]を[Y2]\n"
+        "【負例】\n"
+        "明日の予定を確認する->(確認する,明日の予定)->[*1X1]を[Y1-サ変]する->[*1X1]が[Y1-サ変]する【負例理由】文の構造と違う文字列（を→が）に変更している\n"
+        "私は放課後に晩御飯を調理し、100円のガムを噛みます->(作り,晩御飯)(100円,ガム)->[X1]を[Y1-サ変]し、[Y2]が[X2]->[X1]を[Y1-サ変]し、[X2]を[Y2]【負例理由】文の構造に合った文字列に調整（を→の）できていない\n"
+        "私は放課後に晩御飯を調理し、明日の朝食を考える->(作り,晩御飯)(考える,明日の朝食)->[X1]を[Y1-サ変]し、[*1X2]に[Y2]->[X1]は[Y2]に[X2]を[Y2-サ変]し、[*1X3]を[Y3]【負例理由】文の構造に合っているが余計なパターン記号（[X1]は[Y2]に）を増やしている\n"
+        f"【入力文】：\n{sentence}\n"
+        f"【抽出したい知識グラフTriple】：\n{target_triple}\n"
+        f"【調整対象のパターン】：\n{pattern}\n"
+        "【出力】\n"
+        "以下のJSON形式で出力してください：\n"
+        "{\n"
+        '  "input": "入力文",\n'
+        '  "target_triple": "抽出したいトリプル",\n'
+        '  "pattern": "調整されたパターン"\n'
+        "}\n"
+    )
+    return prompt
+
+
 now = datetime.now()
 log_filename = os.path.join(log_dir, now.strftime("gpt_log_%Y%m%d_%H%M%S.json"))
 log_data = {
     "start_time": now.isoformat(),
     "input_file": INPUT_CSV,
     "output_file": OUTPUT_CSV,
-    "prompt":build_prompt("dummy_sentence", "dummy_triple"),
+    "step1_prompt":build_make_pattern_prompt("dummy_sentence", "dummy_triple"),
+    "step2_prompt":plastic_pattern_prompt("dummy_sentence", "dummy_triple", "dummy_pattern"),
     "results": [],
     "errors": []
 }
@@ -133,15 +176,11 @@ client = OpenAI(
     ),
 )
 
-def ask_gpt(sentence, target_triple, prompt_func=build_prompt):
-    """
-    sentence, target_triple に加え、
-    prompt_func でプロンプト生成関数を指定可能に。
-    """
-    prompt = prompt_func(sentence, target_triple)
+def ask_gpt(prompt):
+    # client = openai.OpenAI(api_key=API_KEY_OPENAI)
     messages = [
         {"role": "system", "content": "あなたは日本語の知識グラフ抽出パターン変換の専門家です。"},
-        {"role": "user",   "content": prompt}
+        {"role": "user", "content": prompt}
     ]
     for attempt in range(RETRY_MAX):
         try:
@@ -174,23 +213,22 @@ response_schema = {
     "target_triple": {"type": "STRING"},
     "pattern": {"type": "STRING"}
 }
-def ask_gemini(sentence, target_triple, prompt_func=build_prompt):
-    """
-    prompt_func でプロンプト生成関数を選択可能
-    """
-    prompt = prompt_func(sentence, target_triple)
+
+def ask_gemini(prompt):
     model = genai.GenerativeModel(
         model_name=MODEL_NAME,
         generation_config=genai.types.GenerationConfig(
             response_mime_type="application/json",
             response_schema=response_schema,
-            temperature=0.0,
-            max_output_tokens=512
+            temperature=0.0,       # 出力の一貫性重視
+            max_output_tokens=512 # 出力トークン上限
         )
     )
     for attempt in range(RETRY_MAX):
         try:
+            # Geminiのgenerate_contentは通常、文字列またはJSONを返す
             response = model.generate_content(prompt)
+            # GeminiではJSONは .text または .candidates[0].text で取得
             response_text = getattr(response, "text", None)
             if response_text is None and hasattr(response, "candidates"):
                 response_text = response.candidates[0].text
@@ -207,11 +245,11 @@ def ask_gemini(sentence, target_triple, prompt_func=build_prompt):
     return {"pattern": "", "error": "API failed or JSON error"}
 
 
-def ask_model(sentence, target_triple, prompt_func=build_prompt):
+def ask_model(prompt):
     if MODEL_NAME.startswith("gpt"):
-        return ask_gpt(sentence, target_triple, prompt_func)
+        return ask_gpt(prompt)
     elif MODEL_NAME.startswith("gemini"):
-        return ask_gemini(sentence, target_triple, prompt_func)
+        return ask_gemini(prompt)
     else:
         raise ValueError("未対応モデル名")
     
@@ -230,6 +268,7 @@ for idx, row in df.iterrows():
     sentence = str(row["sentence"])
     target_triple = str(row["target_triple"])
     pattern_existing = str(row.get("pattern", ""))
+    plastic_pattern = str(row.get("plastic_pattern", ""))
     log_entry = {"id": row.get("id", idx), "input": sentence}
 
     if pattern_existing and pattern_existing != "nan":
@@ -237,14 +276,23 @@ for idx, row in df.iterrows():
         continue
 
     print(f"[{idx}] 送信: {sentence}, {target_triple}")
-    result = ask_model(sentence, target_triple)
-    pattern = result.get("pattern", "")
-    error = result.get("error", "")
-
+    
+    # ＝＝＝＝Step1＝＝＝＝
+    make_pattern_prompt = build_make_pattern_prompt(sentence, target_triple)
+    first_result = ask_model(make_pattern_prompt)
+    pattern = first_result.get("pattern", "")
+    error = first_result.get("error", "")
     df.at[idx, "pattern"] = pattern
+    
+    # ＝＝＝＝Step2＝＝＝＝
+    plastic_pattern_prompt = plastic_pattern_prompt(sentence, target_triple, pattern)
+    second_result = ask_model(plastic_pattern_prompt)
+    plasticed_pattern = second_result.get("pattern", "")
+    df.at[idx, "plastic_pattern"] = plasticed_pattern
 
     log_entry.update({
         "pattern": pattern,
+        "plastic_pattern": plasticed_pattern,
         "error": error,
         "timestamp": datetime.now().isoformat()
     })
