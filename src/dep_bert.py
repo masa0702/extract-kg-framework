@@ -3,7 +3,7 @@ import torch
 from transformers import BertTokenizer, BertForSequenceClassification
 
 class DependencyModificationRelationDetector:
-    def __init__(self, model_path="./output_bert_dependency_ver2.0/final_model"):
+    def __init__(self, model_path="../models/output_bert_dependency_ver2.0/final_model"):
         self.tokenizer = BertTokenizer.from_pretrained(model_path)
         self.model = BertForSequenceClassification.from_pretrained(model_path)
         self.model.eval()
@@ -29,12 +29,12 @@ class DependencyModificationRelationDetector:
 if __name__ == "__main__":
     DepRel = DependencyModificationRelationDetector()
     # サンプル入力（適宜変更してください）
-    text_a = "技術的な"
-    text_b = "製品情報を"
+    text_a = "メンバーおよび"
+    text_b = "コーチでした。"
     # text_a = "エンジニアと"
     # text_b = "マネージャーが"
     # 推論の実行
-    pred, probs = DepRel.predict_dependency_relation(text_a, text_b)
+    pred, probs = DepRel.predict_relation(text_a, text_b)
     
     # 結果の表示
     relation_str = "係り受け関係あり" if pred == 1 else "係り受け関係なし"
