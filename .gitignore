@@ -179,6 +179,7 @@ cython_debug/
 *.joblib
 core*
 *.png
+.DS_Store
 
 # ignore dirs
 tool_test/
@@ -186,3 +187,8 @@ test_asts/
 ignore_src/
 temporary_saving/
 models/
+add_pattern_data/
+fix*/
+parallel*/
+results/
+translate*/
