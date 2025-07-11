@@ -72,3 +72,15 @@ python src/main.py
 ```
 
 `src/main.py` は簡単なデータセットに対して上記の解析とマッチングを実行し、一致した変数ペアを CSV に出力します。
+
+## 付属ドキュメント
+
+`document` ディレクトリに各処理の詳細をまとめた解説を用意しています。
+
+- `matching_document.md` : CKYMatcher のマッチング処理
+- `cky_table.md` : CKY 表生成と操作
+- `parser.md` : パターンパーサーの仕組み
+- `clause_segmentation.md` : 文節分割処理の概要
+- `ast.md` : パターン AST の構造
+
+必要に応じて参照してください。
