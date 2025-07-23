@@ -26,8 +26,8 @@ log_dir = "../results/logs"
 # ===== モデル切り替え =====
 # MODEL_NAME = "gpt-4.1-nano"
 # MODEL_NAME = "gpt-4.1-mini"
-MODEL_NAME = "gpt-4o-mini"
-# MODEL_NAME = "gemini-2.0-flash"
+# MODEL_NAME = "gpt-4o-mini"
+MODEL_NAME = "gemini-2.0-flash"
 
 INPUT_CSV = os.path.join(input_dir, f"parallel_test.csv")
 OUTPUT_CSV = os.path.join(output_dir, f"parallel_test_{MODEL_NAME}.csv")
@@ -216,53 +216,53 @@ def judge_parallel(sentence: str, parallel_elements: list) -> bool:
         print("不正な返答:", result)
         return None  # or raise Exception
 
-# # --- CSV読み込み ---
-# if os.path.exists(OUTPUT_CSV):
-#     df = pd.read_csv(OUTPUT_CSV, dtype=str)
-#     print(f"既存のoutput.csvを再利用します。未処理行のみ再度リクエストします。")
-# else:
-#     df = pd.read_csv(INPUT_CSV, dtype=str)
-#     if "pattern" not in df.columns:
-#         df["pattern"] = ""
+# --- CSV読み込み ---
+if os.path.exists(OUTPUT_CSV):
+    df = pd.read_csv(OUTPUT_CSV, dtype=str)
+    print(f"既存のoutput.csvを再利用します。未処理行のみ再度リクエストします。")
+else:
+    df = pd.read_csv(INPUT_CSV, dtype=str)
+    if "pattern" not in df.columns:
+        df["pattern"] = ""
 
-# # ─── ここで parallel_elements 列を to_list で変換 ───
-# df["parallel_elements"] = df["parallel_elements"].apply(to_list)
+# ─── ここで parallel_elements 列を to_list で変換 ───
+df["parallel_elements"] = df["parallel_elements"].apply(to_list)
 
 
-# # --- メインループ ---
-# for idx, row in df.iterrows():
-#     sentence = str(row["sentence"])
-#     parallel_elements = row["parallel_elements"]
-#     judge_result = str(row.get("judge_result", ""))
-#     log_entry = {"id": row.get("id", idx), "input": sentence}
+# --- メインループ ---
+for idx, row in df.iterrows():
+    sentence = str(row["sentence"])
+    parallel_elements = row["parallel_elements"]
+    judge_result = str(row.get("judge_result", ""))
+    log_entry = {"id": row.get("id", idx), "input": sentence}
 
-#     if judge_result and judge_result != "nan":
-#         print(f"[{idx}] スキップ: judge_result既存-> {judge_result}")
-#         continue
+    if judge_result and judge_result != "nan":
+        print(f"[{idx}] スキップ: judge_result既存-> {judge_result}")
+        continue
 
-#     print(f"[{idx}] 送信: {sentence}, {parallel_elements}")
+    print(f"[{idx}] 送信: {sentence}, {parallel_elements}")
     
-#     alternation_prompt = build_alternation_prompt(sentence, parallel_elements)
-#     result = ask_model(alternation_prompt)
-#     judge_result = result.get("judge_result", "")
-#     error = result.get("error", "")
-#     df.at[idx, "judge_result"] = judge_result
+    alternation_prompt = build_alternation_prompt(sentence, parallel_elements)
+    result = ask_model(alternation_prompt)
+    judge_result = result.get("judge_result", "")
+    error = result.get("error", "")
+    df.at[idx, "judge_result"] = judge_result
     
 
-#     log_entry.update({
-#         "pattern": judge_result,
-#         "error": error,
-#         "timestamp": datetime.now().isoformat()
-#     })
-#     log_data["results"].append(log_entry)
-#     if error:
-#         log_data["errors"].append(log_entry)
+    log_entry.update({
+        "pattern": judge_result,
+        "error": error,
+        "timestamp": datetime.now().isoformat()
+    })
+    log_data["results"].append(log_entry)
+    if error:
+        log_data["errors"].append(log_entry)
 
-#     df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
-#     time.sleep(SLEEP_TIME)
+    df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+    time.sleep(SLEEP_TIME)
 
-# log_data["end_time"] = datetime.now().isoformat()
-# with open(log_filename, "w", encoding="utf-8") as f:
-#     json.dump(log_data, f, ensure_ascii=False, indent=2)
+log_data["end_time"] = datetime.now().isoformat()
+with open(log_filename, "w", encoding="utf-8") as f:
+    json.dump(log_data, f, ensure_ascii=False, indent=2)
 
-# print(f"処理完了！出力: {OUTPUT_CSV}, ログ: {log_filename}")
+print(f"処理完了！出力: {OUTPUT_CSV}, ログ: {log_filename}")
