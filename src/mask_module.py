@@ -112,8 +112,8 @@ if __name__ == '__main__':
     detector = MaskRelationDetector()
     
     # サンプル入力: 非トークナイズの文字列
-    text_A = "『ちいさいおうち』の"    # 末尾語が[MASK]に置換される
-    text_B = "著者であり"
+    text_A = "翌年の"    # 末尾語が[MASK]に置換される
+    text_B = "アカデミー短編アニメ映画賞を"
     
     relation = detector.predict_relation(text_A, text_B)
     top_k = detector._get_mask_topk(text_A, text_B)
