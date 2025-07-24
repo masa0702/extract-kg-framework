@@ -33,6 +33,8 @@ if __name__ == "__main__":
     text_b = "コーチでした。"
     # text_a = "エンジニアと"
     # text_b = "マネージャーが"
+    # text_a = "エンジニアの"
+    # text_b = "仕事はプログラムです。"
     # 推論の実行
     pred, probs = DepRel.predict_relation(text_a, text_b)
     

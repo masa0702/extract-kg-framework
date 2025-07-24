@@ -301,8 +301,10 @@ class CKYMatcher:
                 success = True
 
                 for opt in perm:
+                    idx_child = perm.index(opt)
                     ok, lp_tmp, last_tmp = self._assign_dynamic_indices(
-                        opt, leaves, lp_tmp, counters, node, parent_children, idx_in_parent
+                        opt, leaves, lp_tmp, counters, last_tmp, parent_children=perm, idx_in_parent=idx_child,
+                        depth=depth + 1, parent_node=node
                     )
                     if not ok:
                         success = False
@@ -334,7 +336,9 @@ class CKYMatcher:
             for ch in children:
                 ok, leaf_ptr, last_var_idx = self._assign_dynamic_indices(
                     ch, leaves, leaf_ptr, counters,
-                    node, children, 0  # idx_in_parent は 0 で OK
+                    last_var_idx,                 # ← ここを修正
+                    parent_children=children, idx_in_parent=0,
+                    depth=depth + 1, parent_node=node
                 )
                 if not ok:
                     leaf_ptr = self._restore(saved, counters)

@@ -3,9 +3,11 @@ import time
 import json
 import os
 import ast
+import re
 
-import google.generativeai as genai
-import google.api_core.exceptions
+from google import genai                     # ★ 新しい import
+from google.genai import types              # ★ 型ヒント用
+import google.api_core.exceptions as gexc   # SDK が内部で使用
 import openai
 from openai import OpenAI, DefaultHttpxClient
 
@@ -27,7 +29,7 @@ log_dir = "../results/logs"
 # MODEL_NAME = "gpt-4.1-nano"
 # MODEL_NAME = "gpt-4.1-mini"
 # MODEL_NAME = "gpt-4o-mini"
-MODEL_NAME = "gemini-2.0-flash"
+MODEL_NAME = "gemini-1.5-flash"
 
 INPUT_CSV = os.path.join(input_dir, f"parallel_test.csv")
 OUTPUT_CSV = os.path.join(output_dir, f"parallel_test_{MODEL_NAME}.csv")
@@ -35,7 +37,7 @@ OUTPUT_CSV = os.path.join(output_dir, f"parallel_test_{MODEL_NAME}.csv")
 
 RPM_LIMIT = 15
 RETRY_MAX = 3
-SLEEP_TIME = 60 / RPM_LIMIT + 0.2
+SLEEP_SEC = 60 / RPM_LIMIT + 0.2
 
 
 
@@ -63,7 +65,7 @@ def build_alternation_prompt(sentence, parallel_elements):
 
         【判定方法】
         - 両方の基準を満たした場合のみ「True」、いずれか一つでも満たさなければ「False」。
-        - 出力は必ず以下のjson形式のみ。判定理由や補足コメントは**絶対に付けない**こと。
+        - 出力は必ず以下のJSON形式のみ。判定理由や補足コメントは**絶対に付けない**こと。
 
         json
         {
@@ -131,41 +133,63 @@ def ask_gpt(prompt):
     return {"judge_result": "", "error": "API failed or JSON error"}
 
 
+client = genai.Client()
+# ── JSON スキーマ ────────────────────────
 response_schema = {
-    "input": {"type": "STRING"},
-    "parallel_elements": {"type": "STRING"},
-    "judge_result": {"type": "STRING"}
+    "type": "object",
+    "properties": {
+        "input":             {"type": "string"},
+        "parallel_elements": {"type": "array", "items": {"type": "string"}},
+        "judge_result":      {"type": "string"},
+    },
+    "required": ["input", "parallel_elements", "judge_result"],
+    "propertyOrdering": ["input", "parallel_elements", "judge_result"],
 }
 
-def ask_gemini(prompt):
-    model = genai.GenerativeModel(
-        model_name=MODEL_NAME,
-        generation_config=genai.types.GenerationConfig(
-            response_mime_type="application/json",
-            response_schema=response_schema,
-            temperature=0.0,       # 出力の一貫性重視
-            max_output_tokens=512 # 出力トークン上限
-        )
+# ── 余計な前置き／コードブロックを除去するヘルパ ─────────
+_json_pat = re.compile(r"```(?:json)?\s*({.*?})\s*```", re.S)
+def _clean_json(text: str) -> str:
+    m = _json_pat.search(text) or re.search(r"\{.*\}", text, re.S)
+    if not m:
+        raise ValueError("JSON block not found")
+    return m.group(1) if m.lastindex else m.group(0)
+
+# ── メイン関数 ───────────────────────────
+def ask_gemini(prompt: str) -> dict:
+    cfg = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=response_schema,
+        temperature=0.0,
+        max_output_tokens=512,
     )
-    for attempt in range(RETRY_MAX):
+
+    for _ in range(RETRY_MAX):
         try:
-            # Geminiのgenerate_contentは通常、文字列またはJSONを返す
-            response = model.generate_content(prompt)
-            # GeminiではJSONは .text または .candidates[0].text で取得
-            response_text = getattr(response, "text", None)
-            if response_text is None and hasattr(response, "candidates"):
-                response_text = response.candidates[0].text
-            return json.loads(response_text)
-        except google.api_core.exceptions.ResourceExhausted:
-            print("APIレート制限に達しました。10秒後に再試行します…")
-            time.sleep(10)
-        except json.JSONDecodeError:
-            print("JSON解析エラー。5秒後に再試行します…")
-            time.sleep(5)
+            resp = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=prompt,          # ← `contents=` が正式
+                config=cfg,
+            )
+
+            # ① schema が効いている場合
+            if resp.parsed:
+                return resp.parsed
+
+            # ② テキストから JSON を抽出
+            try:
+                return json.loads(resp.text)
+            except json.JSONDecodeError:
+                return json.loads(_clean_json(resp.text))
+
+        except gexc.ResourceExhausted:
+            print("Rate‑limit…待機"); time.sleep(SLEEP_SEC)
+        except (json.JSONDecodeError, ValueError):
+            print("JSON 抽出失敗…再試行"); time.sleep(SLEEP_SEC)
         except Exception as e:
-            print(f"APIエラー: {e}（{attempt+1}回目）")
-            time.sleep(10)
-    return {"judge_result": "", "error": "API failed or JSON error"}
+            print(f"Gemini Error: {e} …再試行"); time.sleep(SLEEP_SEC)
+
+    return {"error": "max‑retries"}
+
 
 
 def ask_model(prompt):
@@ -216,53 +240,57 @@ def judge_parallel(sentence: str, parallel_elements: list) -> bool:
         print("不正な返答:", result)
         return None  # or raise Exception
 
+# sentence = "エンジニアがPythonとJavaを学ぶ"
+# parallel_elements = ["Python", "Java"]
+# prompt = build_alternation_prompt(sentence, parallel_elements)
+# print(ask_model(prompt))
 # --- CSV読み込み ---
-if os.path.exists(OUTPUT_CSV):
-    df = pd.read_csv(OUTPUT_CSV, dtype=str)
-    print(f"既存のoutput.csvを再利用します。未処理行のみ再度リクエストします。")
-else:
-    df = pd.read_csv(INPUT_CSV, dtype=str)
-    if "pattern" not in df.columns:
-        df["pattern"] = ""
+# if os.path.exists(OUTPUT_CSV):
+#     df = pd.read_csv(OUTPUT_CSV, dtype=str)
+#     print(f"既存のoutput.csvを再利用します。未処理行のみ再度リクエストします。")
+# else:
+#     df = pd.read_csv(INPUT_CSV, dtype=str)
+#     if "pattern" not in df.columns:
+#         df["pattern"] = ""
 
-# ─── ここで parallel_elements 列を to_list で変換 ───
-df["parallel_elements"] = df["parallel_elements"].apply(to_list)
+# # ─── ここで parallel_elements 列を to_list で変換 ───
+# df["parallel_elements"] = df["parallel_elements"].apply(to_list)
 
 
-# --- メインループ ---
-for idx, row in df.iterrows():
-    sentence = str(row["sentence"])
-    parallel_elements = row["parallel_elements"]
-    judge_result = str(row.get("judge_result", ""))
-    log_entry = {"id": row.get("id", idx), "input": sentence}
+# # --- メインループ ---
+# for idx, row in df.iterrows():
+#     sentence = str(row["sentence"])
+#     parallel_elements = row["parallel_elements"]
+#     judge_result = str(row.get("judge_result", ""))
+#     log_entry = {"id": row.get("id", idx), "input": sentence}
 
-    if judge_result and judge_result != "nan":
-        print(f"[{idx}] スキップ: judge_result既存-> {judge_result}")
-        continue
+#     if judge_result and judge_result != "nan":
+#         print(f"[{idx}] スキップ: judge_result既存-> {judge_result}")
+#         continue
 
-    print(f"[{idx}] 送信: {sentence}, {parallel_elements}")
+#     print(f"[{idx}] 送信: {sentence}, {parallel_elements}")
     
-    alternation_prompt = build_alternation_prompt(sentence, parallel_elements)
-    result = ask_model(alternation_prompt)
-    judge_result = result.get("judge_result", "")
-    error = result.get("error", "")
-    df.at[idx, "judge_result"] = judge_result
+#     alternation_prompt = build_alternation_prompt(sentence, parallel_elements)
+#     result = ask_model(alternation_prompt)
+#     judge_result = result.get("judge_result", "")
+#     error = result.get("error", "")
+#     df.at[idx, "judge_result"] = judge_result
     
 
-    log_entry.update({
-        "pattern": judge_result,
-        "error": error,
-        "timestamp": datetime.now().isoformat()
-    })
-    log_data["results"].append(log_entry)
-    if error:
-        log_data["errors"].append(log_entry)
+#     log_entry.update({
+#         "pattern": judge_result,
+#         "error": error,
+#         "timestamp": datetime.now().isoformat()
+#     })
+#     log_data["results"].append(log_entry)
+#     if error:
+#         log_data["errors"].append(log_entry)
 
-    df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
-    time.sleep(SLEEP_TIME)
+#     df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
+#     time.sleep(SLEEP_TIME)
 
-log_data["end_time"] = datetime.now().isoformat()
-with open(log_filename, "w", encoding="utf-8") as f:
-    json.dump(log_data, f, ensure_ascii=False, indent=2)
+# log_data["end_time"] = datetime.now().isoformat()
+# with open(log_filename, "w", encoding="utf-8") as f:
+#     json.dump(log_data, f, ensure_ascii=False, indent=2)
 
-print(f"処理完了！出力: {OUTPUT_CSV}, ログ: {log_filename}")
+# print(f"処理完了！出力: {OUTPUT_CSV}, ログ: {log_filename}")

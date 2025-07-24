@@ -27,7 +27,7 @@ from semantic_judge import judge_parallel
 # 設定
 # =============================================================
 AST_PICKLE      = "../data/patterns/patterns_ast.pkl.gz"
-INPUT_SENT_CSV  = "../data/target_datas/military_target_data.csv"
+INPUT_SENT_CSV  = "../data/target_datas/test_target_data.csv"
 
 # ---------- 出力関連 ----------
 dir_name  = os.path.basename(os.path.dirname(INPUT_SENT_CSV))
@@ -154,18 +154,20 @@ def process_sentence(row):
     cky_table = info["dependency_table"]
     clauses   = info["clauses"]
     cky_dep   = analyzer.analyze_cky_table(cky_table)
-
+    # CkyTableObj.display_multiline_cky_table(cky_dep)
     bunsetsu_cnt = len(cky_table[0])
     candidate_asts = []
-    for v in range(1, bunsetsu_cnt + 1):
+    for v in range(1, bunsetsu_cnt + 2):
         candidate_asts.extend(ast_dict.get(v, []))
     if not candidate_asts:
         return []
-
+    
     seen = set()
     recs = []
     for ast in candidate_asts:
         matcher = CKYMatcher(ast, verbose=False)
+        # match_results = list(matcher.match_table(cky_dep))
+        # print(f"AST: {type(ast)}, matches: {len(match_results)}")
         for r in matcher.match_table(cky_dep):
             key = frozenset(r.variable_mapping.items())
             if key in seen:
@@ -176,6 +178,7 @@ def process_sentence(row):
             par_names = extract_parallel_variables(ast)
             par_elems = [cmap.get(n) for n in par_names if n in cmap]
             if par_elems and judge_parallel(sentence, par_elems) is False:
+                # print("judge_parallel fail:", sentence, par_elems)
                 continue
 
             Xs = [(k, v) for k, v in cmap.items() if k.startswith("X")]
