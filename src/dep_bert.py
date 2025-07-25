@@ -3,7 +3,7 @@ import torch
 from transformers import BertTokenizer, BertForSequenceClassification
 
 class DependencyModificationRelationDetector:
-    def __init__(self, model_path="../models/output_bert_dependency_ver2.0/final_model"):
+    def __init__(self, model_path="../../output_bert_dependency_ver2.0/final_model"):
         self.tokenizer = BertTokenizer.from_pretrained(model_path)
         self.model = BertForSequenceClassification.from_pretrained(model_path)
         self.model.eval()
