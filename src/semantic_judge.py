@@ -29,7 +29,7 @@ log_dir = "../results/logs"
 # MODEL_NAME = "gpt-4.1-nano"
 # MODEL_NAME = "gpt-4.1-mini"
 # MODEL_NAME = "gpt-4o-mini"
-MODEL_NAME = "gemini-1.5-flash"
+MODEL_NAME = "gemini-2.0-flash"
 
 INPUT_CSV = os.path.join(input_dir, f"parallel_test.csv")
 OUTPUT_CSV = os.path.join(output_dir, f"parallel_test_{MODEL_NAME}.csv")
