@@ -15,6 +15,7 @@ import pickle
 import time
 import pandas as pd
 from collections import defaultdict
+from itertools import product
 from tqdm.auto import tqdm
 
 import multiprocessing as mp
@@ -229,28 +230,21 @@ def process_sentence(row_dict):
                     Xs.append((k, v2))
                 elif k.startswith("Y"):
                     Ys.append((k, v2))
+            Xs = list({xv: (xk, xv) for xk, xv in Xs}.values())
+            Ys = list({yv: (yk, yv) for yk, yv in Ys}.values())
 
             if len(Xs) == 0 or len(Ys) == 0:
                 continue
 
-            idx = 0
-            xi = 0
-            while xi < len(Xs):
-                xk, xv = Xs[xi]
-                yi = 0
-                while yi < len(Ys):
-                    yk, yv = Ys[yi]
-                    rec = {
-                        "id":           sent_id,
-                        "sentence":     sentence,
-                        "triple_index": idx,
-                        "rel_ja":       yv,
-                        "arg_ja":       xv
-                    }
-                    recs.append(rec)
-                    idx += 1
-                    yi += 1
-                xi += 1
+            for idx, ((xk, xv), (yk, yv)) in enumerate(product(Xs, Ys)):
+                rec = {
+                    "id":           sent_id,
+                    "sentence":     sentence,
+                    "triple_index": idx,
+                    "rel_ja":       yv,
+                    "arg_ja":       xv
+                }
+                recs.append(rec)
         i += 1
 
     return recs
