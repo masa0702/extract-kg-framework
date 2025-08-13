@@ -48,6 +48,7 @@ class CKYMatcher:
         self.pattern_ast = pattern_ast
         self.verbose = verbose     # ← 追加
         self._all_vars = list(self._collect_variable_nodes(self.pattern_ast))
+        self._assign_seq_ids()
 
     # -------------------------------------------------------------
     #  ログ出力（verbose=True のときだけ表示）
@@ -121,7 +122,6 @@ class CKYMatcher:
         self._clear_leaf_indices(self.pattern_ast)
 
         # ② 既存処理
-        self._assign_seq_ids()
         leaves = self._collect_leaves(cand)
 
         ok, _, _ = self._assign_dynamic_indices(self.pattern_ast, leaves)
@@ -132,11 +132,11 @@ class CKYMatcher:
         if not self._dependency_label_filter(cand):
             self._log("B: dependency-label filter failed")
             return None
-        if not self._literal_filter(cand):
+        if not self._literal_filter(cand, leaves):
             self._log("C: literal filter failed")
             return None
 
-        res = self._pos_and_variable_filter(cand)
+        res = self._pos_and_variable_filter(cand, leaves)
         if res is None:
             self._log("D: pos/variable filter failed")
         else:
@@ -153,12 +153,11 @@ class CKYMatcher:
         return all(actual.get(lbl, 0) >= need for lbl, need in required.items())
 
     # --- phase-2 : リテラル ---
-    def _literal_filter(self, cand: Dict[str, Any]) -> bool:
+    def _literal_filter(self, cand: Dict[str, Any], leaves) -> bool:
         literal_nodes = self.pattern_ast.get_literal_nodes()
         if not literal_nodes:
             return True
 
-        leaves = self._collect_leaves(cand)
         total = len(leaves)
 
         for tokens, leaf_idx in literal_nodes:
@@ -180,8 +179,7 @@ class CKYMatcher:
         return True
 
     # --- phase-3 : 品詞 + 変数 ---
-    def _pos_and_variable_filter(self, cand: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        leaves = self._collect_leaves(cand)
+    def _pos_and_variable_filter(self, cand: Dict[str, Any], leaves) -> Optional[Dict[str, str]]:
         var_constraints = self.pattern_ast.get_variable_constraints()
         varmap: Dict[str, str] = {}
         counter = defaultdict(int)

@@ -199,21 +199,15 @@ class CkyTable:
         各セルがdict, listの場合はjson.dumpsで1行str化して埋める。
         0や数字はそのままstrで埋める。
         """
-        tsv_lines = []
-        for row in cky_table:
-            row_strs = []
-            for cell in row:
-                if isinstance(cell, (dict, list)):
-                    # 1行で収まるようにcompactなjson
-                    cell_str = json.dumps(cell, ensure_ascii=False)
-                else:
-                    cell_str = str(cell)
-                row_strs.append(cell_str)
-            # タブ区切りで結合
-            tsv_lines.append("\t".join(row_strs))
-        # 改行区切りで結合
-        tsv_table="\n".join(tsv_lines)
-        
+        tsv_lines = [
+            "\t".join(
+                json.dumps(cell, ensure_ascii=False) if isinstance(cell, (dict, list)) else str(cell)
+                for cell in row
+            )
+            for row in cky_table
+        ]
+        tsv_table = "\n".join(tsv_lines)
+
         return print(tsv_table)
 
 
