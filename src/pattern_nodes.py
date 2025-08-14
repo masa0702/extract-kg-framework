@@ -223,6 +223,67 @@ class DependencyEdgeNode(PatternNode):
 
 
 # --------------------------------------------------------------------
+#  Helper functions for AST meta information
+# --------------------------------------------------------------------
+def extract_literal_strings(ast: PatternNode) -> List[str]:
+    """Collect all literal strings in DFS order.
+
+    Parameters
+    ----------
+    ast: PatternNode
+        Root of the AST to traverse.
+
+    Returns
+    -------
+    list[str]
+        A list of literal strings as they appear in depth-first order.
+        If the AST contains no ``LiteralNode`` this returns an empty list.
+    """
+
+    literals: List[str] = []
+
+    def _visit(node: PatternNode) -> None:
+        if isinstance(node, LiteralNode):
+            literals.append("".join(node.text_tokens))
+        for child in getattr(node, "children", []) or []:
+            _visit(child)
+
+    _visit(ast)
+    return literals
+
+
+def count_parallel_variables(ast: PatternNode) -> int:
+    """Count VariableNode children directly under any ParallelNode.
+
+    Parameters
+    ----------
+    ast: PatternNode
+        Root of the AST to traverse.
+
+    Returns
+    -------
+    int
+        The number of ``VariableNode`` objects that appear directly under
+        ``ParallelNode`` in the AST. If there is no ``ParallelNode`` this
+        returns ``0``.
+    """
+
+    count = 0
+
+    def _visit(node: PatternNode) -> None:
+        nonlocal count
+        if isinstance(node, ParallelNode):
+            for opt in getattr(node, "options", []) or []:
+                if isinstance(opt, VariableNode):
+                    count += 1
+        for child in getattr(node, "children", []) or []:
+            _visit(child)
+
+    _visit(ast)
+    return count
+
+
+# --------------------------------------------------------------------
 #  動作デモ（実行すると AST 構造を表示）
 # --------------------------------------------------------------------
 if __name__ == "__main__":

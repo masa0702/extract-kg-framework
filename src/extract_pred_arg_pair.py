@@ -24,7 +24,12 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import torch
 
 # ---------- 既存モジュール ----------
-from pattern_nodes import ParallelNode, VariableNode
+from pattern_nodes import (
+    ParallelNode,
+    VariableNode,
+    extract_literal_strings,
+    count_parallel_variables,
+)
 from matcher import CKYMatcher
 from cky_table import CkyTable
 from bert_modules import CKYAnalyzer
@@ -177,10 +182,10 @@ def process_sentence(row_dict):
     clauses   = info["clauses"]
 
     cky_dep = analyzer.analyze_cky_table(cky_table)
-    bunsetsu_cnt = len(cky_table[0])
+    bunsetsu_cnt = len(clauses)
 
     candidate_asts = []
-    v = 1
+    v = 2  # exclude var_count=1
     while v <= bunsetsu_cnt:
         if v in ast_dict_g:
             lst = ast_dict_g[v]
@@ -193,12 +198,55 @@ def process_sentence(row_dict):
     if len(candidate_asts) == 0:
         return []
 
+    # --- Cell-based filtering ---
+    filtered = []
+    for entry in candidate_asts:
+        var_count = entry.get("var_count", 0)
+        literals = entry.get("literal_list", [])
+        par_cnt = entry.get("parallel_var_count", 0)
+        passed = False
+        i1 = 0
+        while i1 < bunsetsu_cnt and not passed:
+            j1 = i1 + 1
+            while j1 < bunsetsu_cnt:
+                chunk_num = j1 - i1 + 1
+                if var_count > chunk_num:
+                    j1 += 1
+                    continue
+                if literals:
+                    cell_text = CkyTable.get_cell_span_text(clauses, i1 + 1, j1 + 1)
+                    lit_ok = True
+                    k = 0
+                    while k < len(literals):
+                        if literals[k] not in cell_text:
+                            lit_ok = False
+                            break
+                        k += 1
+                    if not lit_ok:
+                        j1 += 1
+                        continue
+                if par_cnt >= 2:
+                    if CkyTable.count_parallel_keys(clauses, i1 + 1, j1 + 1) < par_cnt - 1:
+                        j1 += 1
+                        continue
+                passed = True
+                break
+            i1 += 1
+        if passed:
+            filtered.append(entry)
+
+    candidate_asts = filtered
+
+    if len(candidate_asts) == 0:
+        return []
+
     seen = set()
     recs = []
 
     i = 0
     while i < len(candidate_asts):
-        ast = candidate_asts[i]
+        entry = candidate_asts[i]
+        ast = entry["ast"]
         matcher = CKYMatcher(ast, verbose=False)
 
         for r in matcher.match_table(cky_dep):
@@ -261,7 +309,10 @@ def main():
     i = 0
     while i < len(patterns_ast):
         entry = patterns_ast[i]
-        ast_dict[entry["var_count"]].append(entry["ast"])
+        ast = entry["ast"]
+        entry["literal_list"] = extract_literal_strings(ast)
+        entry["parallel_var_count"] = count_parallel_variables(ast)
+        ast_dict[entry["var_count"]].append(entry)
         i += 1
     print("ロード完了: {} パターン".format(len(patterns_ast)))
 

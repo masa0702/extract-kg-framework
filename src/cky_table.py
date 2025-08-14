@@ -1,6 +1,8 @@
 import json
 import pprint
 
+from filter_settings import PARALLEL_KEYS
+
 class CkyTable:
     @staticmethod
     def create_initializing_cky_table(clauses_list: list) -> list:
@@ -65,6 +67,34 @@ class CkyTable:
             cky_table_matrix[index + 1][index + 1] = clause_dict
 
         return cky_table_matrix
+
+    # -------------------------------------------------------------
+    #  Utility methods for cell access
+    # -------------------------------------------------------------
+    @staticmethod
+    def get_cell_span_text(clauses: list, i: int, j: int) -> str:
+        """Return concatenated surface text for clauses[i-1:j].
+
+        Parameters
+        ----------
+        clauses : list
+            List of clause entries. Each entry's first element is the surface
+            string.
+        i, j : int
+            1-based inclusive indices of the clause span.
+        """
+
+        if i > j:
+            return ""
+        surfaces = [cl[0] for cl in clauses[i - 1 : j]]
+        return "".join(surfaces)
+
+    @staticmethod
+    def count_parallel_keys(clauses: list, i: int, j: int) -> int:
+        """Count parallel connective keys within a clause span."""
+
+        text = CkyTable.get_cell_span_text(clauses, i, j)
+        return sum(text.count(k) for k in PARALLEL_KEYS)
 
     @staticmethod
     def display_simple_cky_table(cky_table: list):
