@@ -18,15 +18,16 @@ def parallel_pass(par_cnt, clauses, i, j):
 
 # パターンをパースして AST を構築
 parser = PatternParser()
-ast = parser.parse("[X1]&[Y2]")
+ast = parser.parse("[X1]&[X2]を[Y1]")
 par_cnt = count_parallel_variables(ast)
+print(par_cnt)
 
 # 並列キーを含む文節リスト（pass）
-clauses_ok = [["リンゴ"], ["と"], ["バナナ"]]
+clauses_ok = [["リンゴと"], ["バナナを"],["食べた"]]
 assert parallel_pass(par_cnt, clauses_ok, 1, 3)
 
 # 並列キーを含まない文節リスト（fail）
-clauses_ng = [["リンゴ"], ["バナナ"]]
-assert not parallel_pass(par_cnt, clauses_ng, 1, 2)
+clauses_ng = [["リンゴは"], ["バナナを"],["食べた"]]
+assert not parallel_pass(par_cnt, clauses_ng, 1, 3)
 
 print("parallel filter ok")
