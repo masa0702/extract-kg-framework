@@ -67,62 +67,37 @@ def extract_parallel_variables(ast):
     vars_ = []
 
     def visit(node):
-        if isinstance(node, ParallelNode):
-            if hasattr(node, "options"):
-                for opt in node.options:
-                    if isinstance(opt, VariableNode):
-                        vars_.append(opt)
+        if isinstance(node, ParallelNode) and hasattr(node, "options"):
+            vars_.extend(v for v in node.options if isinstance(v, VariableNode))
         for attr in ("elements", "options", "block"):
-            if hasattr(node, attr):
-                child = getattr(node, attr)
-                if child:
-                    if isinstance(child, list):
-                        for c in child:
-                            visit(c)
-                    else:
-                        visit(child)
+            child = getattr(node, attr, None)
+            if not child:
+                continue
+            if isinstance(child, list):
+                for c in child:
+                    visit(c)
+            else:
+                visit(child)
 
     visit(ast)
 
-    names = []
-    for v in vars_:
-        names.append(f"{v.symbol}{v.index}")
-    return names
+    return [f"{v.symbol}{v.index}" for v in vars_]
 
 def clean_variable_mapping(varmap, clauses):
     """助詞等を落として再結合（内包表現なし）"""
+    exclude_pos = exclude_pos_g if exclude_pos_g is not None else EXCLUDE_POS
+    clause_lookup = {cl[0]: cl for cl in clauses}
     new_map = {}
     for var, val in varmap.items():
-        found = None
-        for cl in clauses:
-            if cl[0] == val:
-                found = cl
-                break
-            else:
-                if val:
-                    if isinstance(val, str):
-                        if cl[0] in val:
-                            found = cl
-                            break
+        found = clause_lookup.get(val)
+        if not found and val and isinstance(val, str):
+            found = next((cl for cl in clauses if cl[0] in val), None)
         if found:
             tokens = found[2]
-            xpos   = found[4]
-            filtered = []
-            i = 0
-            while i < len(tokens):
-                tok = tokens[i]
-                pos = xpos[i]
-                skip = False
-                j = 0
-                while j < len(EXCLUDE_POS):
-                    if EXCLUDE_POS[j] in pos:
-                        skip = True
-                        break
-                    j += 1
-                if not skip:
-                    filtered.append(tok)
-                i += 1
-            if len(filtered) > 0:
+            xpos = found[4]
+            filtered = [tok for tok, pos in zip(tokens, xpos)
+                        if not any(ex in pos for ex in exclude_pos)]
+            if filtered:
                 new_map[var] = "".join(filtered)
         else:
             new_map[var] = val
@@ -179,26 +154,17 @@ def process_sentence(row_dict):
     cky_dep = analyzer.analyze_cky_table(cky_table)
     bunsetsu_cnt = len(cky_table[0])
 
-    candidate_asts = []
-    v = 1
-    while v <= bunsetsu_cnt:
-        if v in ast_dict_g:
-            lst = ast_dict_g[v]
-            i = 0
-            while i < len(lst):
-                candidate_asts.append(lst[i])
-                i += 1
-        v += 1
+    candidate_asts = [ast
+                      for v in range(1, bunsetsu_cnt + 1)
+                      for ast in ast_dict_g.get(v, [])]
 
-    if len(candidate_asts) == 0:
+    if not candidate_asts:
         return []
 
     seen = set()
     recs = []
 
-    i = 0
-    while i < len(candidate_asts):
-        ast = candidate_asts[i]
+    for ast in candidate_asts:
         matcher = CKYMatcher(ast, verbose=False)
 
         for r in matcher.match_table(cky_dep):
@@ -210,30 +176,16 @@ def process_sentence(row_dict):
             cmap = clean_variable_mapping(r.variable_mapping, clauses)
 
             par_names = extract_parallel_variables(ast)
-            par_elems = []
-            j = 0
-            while j < len(par_names):
-                name = par_names[j]
-                if name in cmap:
-                    par_elems.append(cmap[name])
-                j += 1
+            par_elems = [cmap[name] for name in par_names if name in cmap]
 
-            if len(par_elems) > 0:
-                judge = judge_parallel(sentence, par_elems)
-                if judge is False:
+            if par_elems:
+                if judge_parallel(sentence, par_elems) is False:
                     continue
 
-            Xs = []
-            Ys = []
-            for k, v2 in cmap.items():
-                if k.startswith("X"):
-                    Xs.append((k, v2))
-                elif k.startswith("Y"):
-                    Ys.append((k, v2))
-            Xs = list({xv: (xk, xv) for xk, xv in Xs}.values())
-            Ys = list({yv: (yk, yv) for yk, yv in Ys}.values())
+            Xs = list({v: (k, v) for k, v in cmap.items() if k.startswith("X")}.values())
+            Ys = list({v: (k, v) for k, v in cmap.items() if k.startswith("Y")}.values())
 
-            if len(Xs) == 0 or len(Ys) == 0:
+            if not Xs or not Ys:
                 continue
 
             for idx, ((xk, xv), (yk, yv)) in enumerate(product(Xs, Ys)):
@@ -245,8 +197,6 @@ def process_sentence(row_dict):
                     "arg_ja":       xv
                 }
                 recs.append(rec)
-        i += 1
-
     return recs
 
 # =============================================================
@@ -273,10 +223,7 @@ def main():
 
     sent_df = pd.read_csv(INPUT_SENT_CSV, dtype=str)
 
-    # sentences = sent_df["sent"].unique().tolist() を使わずループで
-    sentences = []
-    for s in sent_df["sent"].unique():
-        sentences.append(s)
+    sentences = sent_df["sent"].unique().tolist()
 
     try:
         with open(dep_json_path, "r", encoding="utf-8") as f:
@@ -328,9 +275,7 @@ def main():
     ctx = mp.get_context("spawn")
 
     # --- 送信用 row_dict リスト化（Series は重いので辞書化）---
-    rows = []
-    for _, r in sent_df.iterrows():
-        rows.append({"id": r["id"], "sent": r["sent"]})
+    rows = sent_df[["id", "sent"]].to_dict("records")
 
     futures = []
     with ProcessPoolExecutor(
@@ -339,10 +284,8 @@ def main():
         initializer=init_worker,
         initargs=(0, cky_json_data, ast_dict, EXCLUDE_POS)
     ) as ex:
-        i = 0
-        while i < len(rows):
-            futures.append(ex.submit(process_sentence, rows[i]))
-            i += 1
+        for row in rows:
+            futures.append(ex.submit(process_sentence, row))
 
         for f in tqdm(as_completed(futures), total=len(futures), desc="Sentences"):
             try:

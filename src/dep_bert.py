@@ -18,7 +18,7 @@ class DependencyModificationRelationDetector:
         inputs = self.tokenizer(text_a, text_b, return_tensors="pt", truncation=True, padding=True)
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-        with torch.no_grad():
+        with torch.inference_mode():
             outputs = self.model(**inputs)
         logits = outputs.logits
         predicted_class = torch.argmax(logits, dim=1).item()

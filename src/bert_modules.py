@@ -29,8 +29,9 @@ class CKYAnalyzer:
 
     def analyze_cky_table(self, cky_table):
         n = len(cky_table) - 1  # CKY表は0行0列がヘッダなので-1
+        table_len = len(cky_table)
         # analyze_cky_table 実行前に一次対角セルを全て変換
-        for i in range(1, len(cky_table)):
+        for i in range(1, table_len):
             cell = cky_table[i][i]
             if isinstance(cell, dict) and "candidates" not in cell:
                 text = cell.get("candidate", "")
@@ -38,58 +39,41 @@ class CKYAnalyzer:
                 xpos = cell.get("xpos", [])
                 cell["candidates"] = [{"text": text, "upos": upos, "xpos": xpos}]
 
-        for span in range(2, n+1):
-            for i in range(1, n-span+2):
+        use_model = self.use_model
+        mask_detector = self.mask_detector
+        dep_mod_detector = self.dep_mod_detector
+
+        for span in range(2, n + 1):
+            for i in range(1, n - span + 2):
                 j = i + span - 1
                 candidates = []
-                all_results = []  # ← 全てのペアと判定結果を記録
                 for k in range(i, j):
                     left_cell = cky_table[i][k]
-                    right_cell = cky_table[k+1][j]
+                    right_cell = cky_table[k + 1][j]
                     if not (isinstance(left_cell, dict) and isinstance(right_cell, dict)):
                         continue
                     left_candidates = left_cell.get("candidates", [])
                     right_candidates = right_cell.get("candidates", [])
+                    if not left_candidates or not right_candidates:
+                        continue
                     for left_cand in left_candidates:
+                        text_A = left_cand.get("text", "")
                         for right_cand in right_candidates:
-                            text_A = left_cand.get("text", "")
                             text_B = right_cand.get("text", "")
                             dependency_label = None
-                            pred_result = 0
-                            acl_result = 0
-                            mod_result = 0
-
-                            if self.use_model:
-                                dependency_label, _ = self.mask_detector.predict_relation(text_A, text_B)
-                                if dependency_label == "項-述語":
-                                    pred_result = 1
-                                elif dependency_label == "連体修飾":
-                                    acl_result = 1
-                                else:
-                                    mod_result, _ = self.dep_mod_detector.predict_relation(text_A, text_B)
+                            if use_model:
+                                dependency_label, _ = mask_detector.predict_relation(text_A, text_B)
+                                if dependency_label not in ("項-述語", "連体修飾"):
+                                    mod_result, _ = dep_mod_detector.predict_relation(text_A, text_B)
                                     if mod_result == 1:
                                         dependency_label = "依存関係"
                             else:
                                 # Heuristic fallback: simple rule based on tokens
                                 if text_A.endswith("を") or text_B.endswith("する"):
                                     dependency_label = "項-述語"
-                                    pred_result = 1
                                 elif text_A.endswith("な") or text_A.endswith("の"):
                                     dependency_label = "連体修飾"
-                                    acl_result = 1
 
-
-                            # 追加: すべてのペアと判定結果を保存
-                            all_results.append({
-                                "left": text_A,
-                                "right": text_B,
-                                "pred_result": pred_result,
-                                "acl_result": acl_result,
-                                "mod_result": mod_result,
-                                "dependency_label": dependency_label
-                            })
-
-                            # 従来どおり候補としても保存
                             if dependency_label is not None:
                                 candidates.append({
                                     "left_k": k,
@@ -102,11 +86,9 @@ class CKYAnalyzer:
                                     },
                                     "text": text_A + text_B
                                 })
-                # セルに候補・全判定結果を格納
                 if not isinstance(cky_table[i][j], dict):
                     cky_table[i][j] = {}
                 cky_table[i][j]["candidates"] = candidates
-                # cky_table[i][j]["all_results"] = all_results   # ← 追加
         return cky_table
 
 
