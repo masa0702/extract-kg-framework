@@ -23,7 +23,7 @@ ast = parser.parse("[X1]&[Y2]")
 par_cnt = count_parallel_variables(ast)
 
 # 並列キーを含む文節リスト（pass）
-clauses_ok = [["リンゴ"], ["と"], ["バナナ"]]
+clauses_ok = [["リンゴ"], ["バナナ"]]
 assert parallel_pass(par_cnt, clauses_ok, 1, 3, PARALLEL_KEYS)
 
 # 並列キーを含まない文節リスト（fail）

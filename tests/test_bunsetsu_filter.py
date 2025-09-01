@@ -18,7 +18,7 @@ def bunsetsu_pass(ast, i, j):
 
 # パターンをパースして AST を構築
 parser = PatternParser()
-ast = parser.parse("[X1][Y2]")
+ast = parser.parse("[X1]は[Y2]")
 
 # テスト用の文節リスト（2文節）
 clauses = [["太郎は"], ["走った"]]

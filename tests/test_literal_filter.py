@@ -23,11 +23,11 @@ def literal_pass(literals, clauses, i, j):
 
 # パターンをパースして AST を構築
 parser = PatternParser()
-ast = parser.parse("[X1]猫[Y2]犬")
+ast = parser.parse("[X1]は[X2]を[Y2]する")
 literals = extract_literal_strings(ast)
 
 # 正しい順序でリテラルが現れる文節リスト
-clauses_ok = [["猫"], ["が"], ["犬"]]
+clauses_ok = [["猫は"], ["職位を"], ["全うする"]]
 assert literal_pass(literals, clauses_ok, 1, 3)
 
 # 2つ目のリテラルが含まれない範囲では不通過
