@@ -1,0 +1,50 @@
+services:
+  pytorch:
+    #以下を自身の学番に変更(コンテナの名称)
+    container_name: mi24a008-KG-framework-pytorch
+
+    #ビルド
+    build:
+      context: .
+      #ビルドする際に使用するdockerfileを指定
+      dockerfile: Dockerfile
+
+      #dockerfileで使用する変数を渡す。
+      args:
+        - http_tmp=$http_proxy
+        - https_tmp=$https_proxy
+
+    #ワーキングディレクトリを/workspaceに設定
+    volumes:
+      - ..:/workspace
+      - /workspace/docker
+      - hf_cache:/workspace/.cache
+
+    #ワーキングディレクトリを/workspaceに設定
+    working_dir: /workspace
+
+    #コンテナ起動時に実行するプログラムを記述
+    command: /bin/bash
+
+    #学内用proxyを使用するための環境変数が書かれたファイルを指定
+    env_file:
+      - .env
+
+    #ttyを有効化
+    tty: true
+
+    #キーボード割込みによるコンテナの停止時、コンテナ内のプロセスに正常終了を通知する。
+    stop_signal: SIGINT
+
+    #GPUを使用するための設定
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+
+    #core dumpを防ぐ為の設定
+    shm_size: 12GB
+
+volumes:
+  hf_cache:
