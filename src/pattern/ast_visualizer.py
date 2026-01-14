@@ -1,8 +1,12 @@
 import os  # 追加
 from graphviz import Digraph
-from pattern_nodes import (
-    PatternNode, VariableNode, LiteralNode,
-    ModifierRepeatNode, ModifierParallelNode, ParallelNode
+from .pattern_nodes import (
+    PatternNode,
+    VariableNode,
+    LiteralNode,
+    ModifierRepeatNode,
+    ModifierParallelNode,
+    ParallelNode,
 )
 
 def visualize_ast(

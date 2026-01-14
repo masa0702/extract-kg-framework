@@ -7,8 +7,9 @@ import re
 
 from itertools import combinations
 from spacy import displacy
-from utils import MyUtility
-from bunsetu import BunsetsuSegmenter
+from .utils import MyUtility
+from .bunsetu import BunsetsuSegmenter
+
 seg = BunsetsuSegmenter()
 nlp = spacy.load("ja_ginza")
 myutil = MyUtility()

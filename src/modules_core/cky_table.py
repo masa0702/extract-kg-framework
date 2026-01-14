@@ -1,7 +1,7 @@
 import json
 import pprint
 
-from filter_settings import PARALLEL_KEYS
+from config.filter_settings import PARALLEL_KEYS
 
 class CkyTable:
     @staticmethod

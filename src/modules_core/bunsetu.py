@@ -4,9 +4,12 @@ from typing import List, Dict, Any
 import spacy, ginza, yaml, pathlib
 import time
 import logging
+
 # ----------------- 設定読み込み -----------------
 HERE = pathlib.Path(__file__).resolve().parent
-DICT_PATH = HERE / "parallel_connectives.yml"
+ROOT = HERE.parent
+CONFIG_DIR = ROOT / "config"
+DICT_PATH = CONFIG_DIR / "parallel_connectives.yml"
 with DICT_PATH.open(encoding="utf-8") as f:
     CONNECTIVES_PARALLEL: set[str] = set(yaml.safe_load(f))
 
@@ -48,8 +51,8 @@ logging.info(f"使用中のspaCyモデル: {nlp.meta['name']}")
 
 
 # ------------- 辞書読み込み -----------------
-CHUNK_PATH = HERE / "fixed_chunks.yml"
-with open('fixed_chunks.yml', encoding='utf-8') as f:
+CHUNK_PATH = CONFIG_DIR / "fixed_chunks.yml"
+with CHUNK_PATH.open(encoding="utf-8") as f:
     POST_PATTERNS = [line.split() for line in yaml.safe_load(f)]
 
 # ------------- 汎用マージ関数 ----------------

@@ -10,8 +10,8 @@
 import pandas as pd
 import pickle, gzip, os, traceback
 from tqdm.auto import tqdm
-from pattern_parser import PatternParser
-from pattern_nodes import VariableNode
+from .pattern_parser import PatternParser
+from .pattern_nodes import VariableNode
 
 # ---------- 設定 ----------
 INPUT_CSV      = "../data/patterns/all_patterns.csv"

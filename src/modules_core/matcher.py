@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional
 
-from pattern_nodes import (
+from pattern.pattern_nodes import (
     PatternNode,
     VariableNode,
     ModifierSingleNode,
@@ -15,7 +15,7 @@ from pattern_nodes import (
     ModifierBlockRepeatNode,
     LiteralNode,
     ParallelNode,
-    SequenceNode
+    SequenceNode,
 )
 
 # ── つなぎ語を検知する正規表現 ──────────────────────────
@@ -475,7 +475,7 @@ class CKYMatcher:
     #  変数ノード一覧を事前に集めておく  (__init__ の末尾で呼び出し)
     # ---------------------------------------------------------
     def _collect_variable_nodes(self, node):
-        from pattern_nodes import VariableNode
+        from pattern.pattern_nodes import VariableNode
         if isinstance(node, VariableNode):
             yield node
         for ch in getattr(node, "children", []):

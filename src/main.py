@@ -34,19 +34,19 @@ from multiprocessing.connection import Connection
 import torch
 
 # ---------- 既存モジュール ----------
-from pattern_nodes import (
+from pattern.pattern_nodes import (
     ParallelNode,
     VariableNode,
     extract_literal_strings,
     count_parallel_variables,
 )
-from matcher import CKYMatcher
-from cky_table import CkyTable
-from bert_modules import CKYAnalyzer
-from clause_analysis import DependencyAnalysis
-from utils import MyUtility
-from semantic_judge import judge_parallel
-from filter_settings import PARALLEL_KEYS
+from modules_core.matcher import CKYMatcher
+from modules_core.cky_table import CkyTable
+from modules_bert.bert_modules import CKYAnalyzer
+from modules_core.clause_analysis import DependencyAnalysis
+from modules_core.utils import MyUtility
+from modules_core.semantic_judge import judge_parallel
+from config.filter_settings import PARALLEL_KEYS
 
 # =============================================================
 # 定数

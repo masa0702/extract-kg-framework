@@ -1,8 +1,8 @@
 import json
 
 try:
-    from mask_module import MaskRelationDetector
-    from dep_bert import DependencyModificationRelationDetector
+    from .mask_module import MaskRelationDetector
+    from .dep_bert import DependencyModificationRelationDetector
     _BERT_AVAILABLE = True
 except Exception:
     # If transformers/torch is not available, fall back to simple heuristics
@@ -10,7 +10,7 @@ except Exception:
     DependencyModificationRelationDetector = None
     _BERT_AVAILABLE = False
 
-from cky_table import CkyTable
+from modules_core.cky_table import CkyTable
 
 class CKYAnalyzer:
     def __init__(self,

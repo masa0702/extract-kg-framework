@@ -1,7 +1,7 @@
 # pattern_parser.py
 
 from lark import Lark, Transformer, v_args
-from pattern_nodes import (
+from .pattern_nodes import (
     PatternNode,
     SequenceNode,
     VariableNode,
@@ -10,9 +10,9 @@ from pattern_nodes import (
     ModifierRepeatNode,
     ModifierParallelNode,
     ModifierSingleNode,
-    ModifierBlockRepeatNode, 
+    ModifierBlockRepeatNode,
 )
-from ast_visualizer import visualize_ast
+from .ast_visualizer import visualize_ast
 
 import os
 
