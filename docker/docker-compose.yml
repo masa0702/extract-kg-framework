@@ -17,7 +17,6 @@ services:
     #ワーキングディレクトリを/workspaceに設定
     volumes:
       - ..:/workspace
-      - /workspace/docker
       - hf_cache:/workspace/.cache
 
     #ワーキングディレクトリを/workspaceに設定
