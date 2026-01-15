@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
+import json
 
 
 @dataclass(frozen=True)
@@ -43,10 +44,42 @@ class LLMJPHTTPClient:
         self.backoff_sec = backoff_sec
 
         self._session = requests.Session()
+        self._session.trust_env = False  # 環境変数 *_proxy を参照しない（内部通信をプロキシ経由にしない） :contentReference[oaicite:3]{index=3}
         self._headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
         }
+
+    def chat_json(
+        self,
+        messages: List[Dict[str, str]],
+        *,
+        json_schema: Dict[str, Any],
+        schema_name: str,
+        model: Optional[str] = None,
+        max_tokens: int = 64,
+        temperature: float = 0.0,
+    ) -> Dict[str, Any]:
+        """
+        vLLM OpenAI互換 /v1/chat/completions を使い、
+        response_format=json_schema で構造化出力を強制して JSON を返す。
+        """
+        payload: Dict[str, Any] = {
+            "model": model or self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": schema_name, "schema": json_schema},
+            },
+        }
+
+        # llmjp_client.py の chat_json 内だけ修正
+
+        data = self._post_with_retry("/chat/completions", payload)
+        content = data["choices"][0]["message"]["content"]
+        return json.loads(content)
 
     def _build_messages(self, user_prompt: str, system_prompt: Optional[str]) -> List[Dict[str, str]]:
         sp = self.system_prompt if system_prompt is None else system_prompt
@@ -164,8 +197,46 @@ class LLMJPHTTPClient:
 _SINGLETON: Optional[LLMJPHTTPClient] = None
 
 
-def get_llmjp_http(system_prompt: str = "") -> LLMJPHTTPClient:
-    global _SINGLETON
-    if _SINGLETON is None:
-        _SINGLETON = LLMJPHTTPClient(system_prompt=system_prompt)
-    return _SINGLETON
+# 使い回し用（mainプロセス内でHTTPセッションを共有したい場合）
+# 以前: _SINGLETON: Optional[LLMJPHTTPClient] = None
+# 変更: 設定ごとに使い回せるように dict にする
+_SINGLETONS: Dict[tuple, LLMJPHTTPClient] = {}
+
+
+def get_llmjp_http(
+    *,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+    system_prompt: str = "",
+    timeout_sec: float = 60.0,
+    max_retries: int = 3,
+    backoff_sec: float = 0.5,
+) -> LLMJPHTTPClient:
+    """
+    設定（base_url/model/timeout等）ごとに LLMJPHTTPClient を使い回す。
+    CKY内の多回呼び出しで Session を毎回作らないための最適化。
+    """
+    key = (
+        (base_url or os.getenv("LLMJP_BASE_URL", "http://llmjp:8000/v1")).rstrip("/"),
+        api_key or os.getenv("LLMJP_API_KEY", "local-token"),
+        model or os.getenv("LLMJP_MODEL", "llmjp-13b"),
+        system_prompt,
+        float(timeout_sec),
+        int(max_retries),
+        float(backoff_sec),
+    )
+
+    c = _SINGLETONS.get(key)
+    if c is None:
+        c = LLMJPHTTPClient(
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+            system_prompt=system_prompt,
+            timeout_sec=timeout_sec,
+            max_retries=max_retries,
+            backoff_sec=backoff_sec,
+        )
+        _SINGLETONS[key] = c
+    return c
