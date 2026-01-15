@@ -19,7 +19,7 @@ RUN sed -i 's|http://security.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu
     apt-get update -y && \
     apt-get install -y --no-install-recommends \
       git curl wget ca-certificates \
-      nano tmux htop \
+      nano tmux htop tree \
       build-essential \
       && rm -rf /var/lib/apt/lists/*
 
@@ -35,9 +35,11 @@ COPY requirements.txt ./
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# ---- DGL CUDA 12.1 対応版（必要な場合のみ）----
-# PyPI の dgl は CPU 版になることがあるため、公式 wheel repo を利用
-RUN pip install --no-cache-dir dgl -f https://data.dgl.ai/wheels/torch-2.2/cu121/repo.html
+
+# ---- DGL CUDA 12.1 対応版（torch 2.3 / cu121 に整合）----
+# 参照: torch 2.3 + cu121 の wheel repo :contentReference[oaicite:3]{index=3}
+RUN pip install --no-cache-dir dgl==2.3.0+cu121 -f https://data.dgl.ai/wheels/torch-2.3/cu121/repo.html
+
 
 # （任意）GiNZA のモデルをコンテナに同梱したい場合
 # RUN python -m spacy download ja_ginza
