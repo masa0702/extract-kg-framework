@@ -1,5 +1,5 @@
 # FROM pytorch/pytorch:2.2.1-cuda12.1-cudnn8-devel
-FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-devel
+FROM pytorch/pytorch:2.6.0-cuda12.6-cudnn9-devel
 
 # docker-compose から引数を受け取る
 ARG http_tmp
@@ -19,19 +19,25 @@ RUN sed -i 's|http://security.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu
     apt-get update -y && \
     apt-get install -y --no-install-recommends \
       git curl wget ca-certificates \
-      nano tmux htop tree \
+      nano tmux htop tree graphviz\
       build-essential \
       && rm -rf /var/lib/apt/lists/*
 
 # ===== Hugging Face cache =====
 # compose で /workspace をマウントする想定
 WORKDIR /workspace
-ENV HF_HOME=/workspace/.cache/huggingface \
+# HF の高速DL(hf_transfer)は不要。環境差でコケるので切る
+ENV HF_HUB_ENABLE_HF_TRANSFER=0 \
+    HF_HOME=/workspace/.cache/huggingface \
     TRANSFORMERS_CACHE=/workspace/.cache/huggingface/transformers \
-    HF_HUB_ENABLE_HF_TRANSFER=1
+    HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets \
+    TOKENIZERS_PARALLELISM=false \
+    PYTHONUNBUFFERED=1 \
+    MPLCONFIGDIR=/workspace/.cache/matplotlib
 
+
+# ===== Python packages =====
 COPY requirements.txt ./
-
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 

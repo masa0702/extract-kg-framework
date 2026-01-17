@@ -22,9 +22,15 @@ services:
     stop_signal: SIGINT
     shm_size: 12GB
 
-    # main は GPU0 に固定（BERT + CKY を安定化）
     environment:
       - CUDA_VISIBLE_DEVICES=0
+      # ★追加：hf_transfer を使わない（無いと落ちるため）
+      - HF_HUB_ENABLE_HF_TRANSFER=0
+      # ★追加：HFキャッシュの場所を固定（ログ/再現性のため）
+      - HF_HOME=/workspace/.cache/huggingface
+      - TRANSFORMERS_CACHE=/workspace/.cache/huggingface/transformers
+      - HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets
+      - TOKENIZERS_PARALLELISM=false
 
     deploy:
       resources:
@@ -38,14 +44,10 @@ services:
       - llmjp
 
   llmjp:
-    # vLLM公式 OpenAI互換サーバ用イメージ :contentReference[oaicite:6]{index=6}
     image: vllm/vllm-openai:latest
     container_name: mi24a008-llmjp-vllm
-
-    # 公式が --ipc=host 相当を推奨 :contentReference[oaicite:7]{index=7}
     ipc: host
 
-    # HF cache を main と共有（ボリュームは同じ、マウント先だけ変える）
     volumes:
       - hf_cache:/root/.cache
 
@@ -53,18 +55,14 @@ services:
       - .env
 
     environment:
-      # GPU1 に固定（LLM常駐用）
-      # - CUDA_VISIBLE_DEVICES=1
-      # HFキャッシュの場所を明示
       - HF_HOME=/root/.cache/huggingface
       - TRANSFORMERS_CACHE=/root/.cache/huggingface/transformers
-      - HF_HUB_ENABLE_HF_TRANSFER=1
+      # ★変更：ここも 0 推奨（hf_transfer 無いと落ちる）
+      - HF_HUB_ENABLE_HF_TRANSFER=0
 
     ports:
       - "8000:8000"
 
-    # vLLM OpenAI互換サーバ起動（Dockerでは image の後ろに引数を渡す形が公式） :contentReference[oaicite:8]{index=8}
-    # ※ RTX 8000(Turing)想定で dtype は half(fp16) を指定
     command:
       - --model
       - llm-jp/llm-jp-3.1-13b-instruct4
@@ -80,12 +78,8 @@ services:
       - "8000"
       - --gpu-memory-utilization
       - "0.90"
-      # 必要ならAPIキーを固定（main側クライアントがこのキーを付与）
       - --api-key
       - local-token
-      # もし起動時に「trust_remote_code が必要」と言われた場合のみ有効化
-      # （vLLM CLI で提供） :contentReference[oaicite:9]{index=9}
-      # - --trust-remote-code
 
     deploy:
       resources:

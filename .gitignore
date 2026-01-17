@@ -168,7 +168,7 @@ cython_debug/
 # prof
 *.prof
 
-*.txt
+# *.txt
 *.pt
 *.png
 *.bin
@@ -194,3 +194,4 @@ results/
 translate*/
 ontology/
 data/
+learn_data/
