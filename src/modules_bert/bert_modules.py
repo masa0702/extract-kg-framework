@@ -15,7 +15,7 @@ from modules_core.cky_table import CkyTable
 class CKYAnalyzer:
     def __init__(self,
                  mask_model_path=None,
-                 dep_mod_model_path="../../output_bert_dependency_ver2.0/final_model",
+                 dep_mod_model_path="./models/output_bert_dependency_bunsetsu_ver3.0/depbert_bunsetsu_20260117_072956/final_model",
                 ):
         if _BERT_AVAILABLE:
             self.mask_detector = MaskRelationDetector(model_name=mask_model_path or "tohoku-nlp/bert-base-japanese-v3")
