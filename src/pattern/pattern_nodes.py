@@ -145,6 +145,27 @@ class LiteralNode(PatternNode):
         return "".join(self.text_tokens)
 
 
+
+
+class GapNode(PatternNode):
+    __slots__ = ("min_skip", "max_skip", "tag")
+
+    def __init__(self, min_skip: int, max_skip: int, tag: Optional[str] = None):
+        super().__init__([])
+        if min_skip < 0 or max_skip < 0:
+            raise ValueError("GapNode の min_skip / max_skip は 0 以上である必要があります")
+        if min_skip > max_skip:
+            raise ValueError("GapNode の min_skip は max_skip 以下である必要があります")
+        self.min_skip = min_skip
+        self.max_skip = max_skip
+        # 制約ラベル（任意）。抽出には使わず、マッチ制約として利用する想定。
+        self.tag = tag
+
+    def __str__(self):
+        tag = f":{self.tag}" if self.tag else ""
+        return f"[G{{{self.min_skip},{self.max_skip}}}{tag}]"
+
+
 class ParallelNode(PatternNode):
     __slots__ = ("options",)
 
@@ -195,13 +216,16 @@ class ModifierBlockRepeatNode(PatternNode):
 class ModifierParallelNode(PatternNode):
     __slots__ = ("kind", "parallel_block", "head", "dep_label", "count")
 
-    def __init__(self, kind: str, parallel_block: ParallelNode, head: PatternNode):
+    def __init__(self, kind: str, parallel_block: ParallelNode, head: PatternNode, count: int = 1):
         super().__init__([parallel_block, head])
+        if count <= 0:
+            raise ValueError("ModifierParallelNode の count は 1 以上である必要があります")
         self.kind = kind
         self.parallel_block = parallel_block
         self.head = head
         self.dep_label = KIND_TO_LABEL[kind]
-        self.count = 1      # 並列修飾は距離 1 固定
+        # 並列修飾も *n/#n の n を保持する（基本は 1）
+        self.count = count
 
 
 # --------------------------------------------------------------------
