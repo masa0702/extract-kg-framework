@@ -45,7 +45,7 @@ from modules_core.cky_table import CkyTable
 from modules_bert.bert_modules import CKYAnalyzer
 from modules_core.bunsetu import DependencyAnalysis
 from modules_core.utils import MyUtility
-from modules_core.semantic_judge import judge_parallel
+from llm.parallel_judge import ParallelJudgeLLMJP
 from config.filter_settings import PARALLEL_KEYS
 
 # =============================================================
@@ -233,6 +233,7 @@ def gpu_child_worker(row_payload, device_id: int, conn: Connection):
 # =============================================================
 def cpu_child_worker(payload, ast_dict, conn: Connection):
     try:
+        judge = ParallelJudgeLLMJP()
         sent_id  = payload["id"]; sentence = payload["sentence"]
         cky_dep  = payload["cky_dep"]; clauses = payload["clauses"]
         B = len(clauses)
@@ -363,8 +364,8 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                 par_names = extract_parallel_variables(ast)
                 par_elems = [varmap_clean[name] for name in par_names if name in varmap_clean]
                 if par_elems:
-                    judge = judge_parallel(sentence, par_elems)
-                    if judge is False:
+                    is_parallel = judge.judge_parallel(sentence, par_elems)
+                    if is_parallel is False:
                         continue
 
                 # X/Y ブロック
