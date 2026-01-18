@@ -43,7 +43,7 @@ from pattern.pattern_nodes import (
 from modules_core.matcher import CKYMatcher
 from modules_core.cky_table import CkyTable
 from modules_bert.bert_modules import CKYAnalyzer
-from modules_core.clause_analysis import DependencyAnalysis
+from modules_core.bunsetu import DependencyAnalysis
 from modules_core.utils import MyUtility
 from modules_core.semantic_judge import judge_parallel
 from config.filter_settings import PARALLEL_KEYS

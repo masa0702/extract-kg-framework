@@ -323,9 +323,6 @@ class BunsetsuSegmenter:
             ]
             for sp in refined
         ]
-        return bunsetsu_list
-
-
     @classmethod
     def segment_sentences(cls, sentences: List[str]) -> Dict[str, List[List[Any]]]:
         """
@@ -344,6 +341,71 @@ class BunsetsuSegmenter:
             sent: cls.segment(sent)  # type: ignore[arg-type]
             for sent, doc in zip(sentences, docs)
         }
+
+
+# ---------------- 依存解析 ----------------
+class DependencyAnalysis:
+    @staticmethod
+    def analyze_sentences(sentences: list[str]) -> dict:
+        """
+        GiNZA 依存構造と文節（bunsetsu）情報をまとめて返す。
+        文節は BunsetsuSegmenter.segment() で取得し、
+        文字位置は 1 始まり・終端包含に正規化する。
+        """
+        docs = nlp.pipe(sentences)
+        results: dict[str, dict] = {}
+        segmenter = BunsetsuSegmenter()
+
+        for sentence, doc in zip(sentences, docs):
+            ginza_dependency = [
+                {
+                    "id": tok.i + 1,
+                    "token": tok.text,
+                    "lemma": tok.lemma_,
+                    "upos": tok.pos_,
+                    "xpos": tok.tag_,
+                    "head": tok.head.i,
+                    "deprel": tok.dep_,
+                    "misc": tok.morph.to_dict(),
+                }
+                for tok in doc
+            ]
+
+            raw_clause_data = segmenter.segment(sentence)
+
+            clause_data = []
+            for (
+                text_span,
+                (st0, ed0),           # 0-based, end exclusive
+                tokens,
+                upos_list,
+                xpos_list,
+                ranges0,
+            ) in raw_clause_data:
+                start_inc = st0 + 1            # 1-based, inclusive
+                end_inc = ed0                  # end exclusive → inclusive
+                ranges_inc = [(s + 1, e) for s, e in ranges0]
+
+                clause_data.append(
+                    [
+                        text_span,
+                        (start_inc, end_inc),
+                        tokens,
+                        upos_list,
+                        xpos_list,
+                        ranges_inc,
+                    ]
+                )
+
+            results[sentence] = {
+                "sentence": sentence,
+                "clauses": clause_data,
+                "ginza_dependency": ginza_dependency,
+                "dependency_table": [],  # 後続処理で埋める想定
+                "results": {},
+            }
+
+        return results
 
 
 # --- 動作確認 ---
