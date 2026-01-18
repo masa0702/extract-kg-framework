@@ -1,29 +1,20 @@
-import pandas as pd
 import time
 import json
 import os
-import ast
 import re
 
 from google import genai                     # ★ 新しい import
 from google.genai import types              # ★ 型ヒント用
 import google.api_core.exceptions as gexc   # SDK が内部で使用
-import openai
 from openai import OpenAI, DefaultHttpxClient
 
-from datetime import datetime
 from dotenv import load_dotenv
 
 
 load_dotenv()
 
 # --- 設定 ---
-API_KEY_GEMINI = os.getenv("GEMINI_API_KEY")
 API_KEY_OPENAI = os.getenv("OPENAI_API_KEY")
-
-input_dir = "../data/parallels"
-output_dir = "../results"
-log_dir = "../results/logs"
 
 # ===== モデル切り替え =====
 # MODEL_NAME = "gpt-4.1-nano"
@@ -31,17 +22,10 @@ log_dir = "../results/logs"
 # MODEL_NAME = "gpt-4o-mini"
 MODEL_NAME = "gemini-2.0-flash"
 
-INPUT_CSV = os.path.join(input_dir, f"parallel_test.csv")
-OUTPUT_CSV = os.path.join(output_dir, f"parallel_test_{MODEL_NAME}.csv")
-
 
 RPM_LIMIT = 15
 RETRY_MAX = 3
 SLEEP_SEC = 60 / RPM_LIMIT + 0.2
-
-
-
-
 def build_alternation_prompt(sentence, parallel_elements):
     # 並列要素をそれぞれ「」で囲み、改行で連結する
     elements_str = ",".join(f"「{e}」" for e in parallel_elements)
@@ -76,19 +60,6 @@ def build_alternation_prompt(sentence, parallel_elements):
         """
     )
     return prompt
-
-
-
-now = datetime.now()
-log_filename = os.path.join(log_dir, now.strftime("gpt_log_%Y%m%d_%H%M%S.json"))
-log_data = {
-    "start_time": now.isoformat(),
-    "input_file": INPUT_CSV,
-    "output_file": OUTPUT_CSV,
-    "step2_prompt":build_alternation_prompt("dummy_sentence", "dummy_element"),
-    "results": [],
-    "errors": []
-}
 
 
 client = OpenAI(
@@ -199,28 +170,6 @@ def ask_model(prompt):
         return ask_gemini(prompt)
     else:
         raise ValueError("未対応モデル名")
-    
-
-def to_list(x):
-    """
-    CSV の文字列を Python のリストに変換
-    例："['a','b','c']", '["a","b","c"]', "[a,b,c]" に対応
-    """
-    if pd.isna(x):
-        return []
-    s = str(x).strip()
-    if not (s.startswith('[') and s.endswith(']')):
-        return []
-    try:
-        return ast.literal_eval(s)
-    except (ValueError, SyntaxError):
-        inner = s[1:-1]
-        items = []
-        for item in inner.split(','):
-            it = item.strip().strip("'\"")
-            if it:
-                items.append(it)
-        return items
 
  
 # --- メイン・利用例 ---
@@ -239,58 +188,3 @@ def judge_parallel(sentence: str, parallel_elements: list) -> bool:
     else:
         print("不正な返答:", result)
         return None  # or raise Exception
-
-# sentence = "エンジニアがPythonとJavaを学ぶ"
-# parallel_elements = ["Python", "Java"]
-# prompt = build_alternation_prompt(sentence, parallel_elements)
-# print(ask_model(prompt))
-# --- CSV読み込み ---
-# if os.path.exists(OUTPUT_CSV):
-#     df = pd.read_csv(OUTPUT_CSV, dtype=str)
-#     print(f"既存のoutput.csvを再利用します。未処理行のみ再度リクエストします。")
-# else:
-#     df = pd.read_csv(INPUT_CSV, dtype=str)
-#     if "pattern" not in df.columns:
-#         df["pattern"] = ""
-
-# # ─── ここで parallel_elements 列を to_list で変換 ───
-# df["parallel_elements"] = df["parallel_elements"].apply(to_list)
-
-
-# # --- メインループ ---
-# for idx, row in df.iterrows():
-#     sentence = str(row["sentence"])
-#     parallel_elements = row["parallel_elements"]
-#     judge_result = str(row.get("judge_result", ""))
-#     log_entry = {"id": row.get("id", idx), "input": sentence}
-
-#     if judge_result and judge_result != "nan":
-#         print(f"[{idx}] スキップ: judge_result既存-> {judge_result}")
-#         continue
-
-#     print(f"[{idx}] 送信: {sentence}, {parallel_elements}")
-    
-#     alternation_prompt = build_alternation_prompt(sentence, parallel_elements)
-#     result = ask_model(alternation_prompt)
-#     judge_result = result.get("judge_result", "")
-#     error = result.get("error", "")
-#     df.at[idx, "judge_result"] = judge_result
-    
-
-#     log_entry.update({
-#         "pattern": judge_result,
-#         "error": error,
-#         "timestamp": datetime.now().isoformat()
-#     })
-#     log_data["results"].append(log_entry)
-#     if error:
-#         log_data["errors"].append(log_entry)
-
-#     df.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
-#     time.sleep(SLEEP_TIME)
-
-# log_data["end_time"] = datetime.now().isoformat()
-# with open(log_filename, "w", encoding="utf-8") as f:
-#     json.dump(log_data, f, ensure_ascii=False, indent=2)
-
-# print(f"処理完了！出力: {OUTPUT_CSV}, ログ: {log_filename}")

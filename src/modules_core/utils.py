@@ -1,7 +1,6 @@
 import csv
 import json
 import os
-from collections import Counter
 from functools import lru_cache
 
 class MyUtility:
@@ -55,37 +54,6 @@ class MyUtility:
     
     
     @staticmethod
-    @lru_cache(maxsize=128)
-    def most_common(lst):
-        """
-        リスト内の最頻値を求める関数。
-
-        Parameters:
-        lst (list): 最頻値を求めるリスト。
-
-        Returns:
-        mixed: 最頻値。リストの要素が全て１回ずつ出現する場合はFalse、リストの中身が1つの場合はTrueを返す。
-        """
-        if len(lst) == 1:
-            return True
-
-        counts = Counter(lst)
-        most_common_count = max(counts.values())
-
-        # リストの要素が全て１回ずつ出現する場合はFalseを返す
-        if most_common_count == 1:
-            return False
-
-        most_common_values = [key for key, value in counts.items() if value == most_common_count]
-
-        # 最頻値が複数ある場合はリストで返す
-        if len(most_common_values) > 1:
-            return most_common_values
-        else:
-            return most_common_values[0]
-        
-    
-    @staticmethod
     def print_limited_data(data, limit=5):
         """
         データの数を制限してprintする関数
@@ -124,33 +92,6 @@ class MyUtility:
             writer = csv.DictWriter(file, fieldnames=field_names)
             writer.writeheader()
             writer.writerows(data)
-
-
-    @staticmethod
-    def most_common(lst):
-        """
-        リスト内の最頻値を求める関数。
-
-        Parameters:
-        lst (list): 最頻値を求めるリスト。
-
-        Returns:
-        mixed: 最頻値。リストの要素が全て１回ずつ出現する場合はFalseを返す。
-        """
-        counts = Counter(lst)
-        most_common_count = max(counts.values())
-
-        # リストの要素が全て１回ずつ出現する場合はFalseを返す
-        if most_common_count == 1:
-            return False
-
-        most_common_values = [key for key, value in counts.items() if value == most_common_count]
-
-        # 最頻値が複数ある場合はリストで返す
-        if len(most_common_values) > 1:
-            return most_common_values
-        else:
-            return most_common_values[0]
 
 
     @staticmethod
