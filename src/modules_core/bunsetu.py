@@ -323,6 +323,8 @@ class BunsetsuSegmenter:
             ]
             for sp in refined
         ]
+        return bunsetsu_list
+    
     @classmethod
     def segment_sentences(cls, sentences: List[str]) -> Dict[str, List[List[Any]]]:
         """
@@ -411,9 +413,10 @@ class DependencyAnalysis:
 # --- 動作確認 ---
 if __name__ == "__main__":
     # test = "各製品ラインに関する組織内のコンプライアンス・プログラムの編成、開発、維持、および調整を主導する"
+    test = "リンゴとみかんを購入する太郎と花子を監視する。"
     # test = "信託商品および信託サービスについて、幅広い管理補助と関連業務の調整を行う"
     # test = "Man on Horsebackはフォルカー・シュレンドルフが監督、脚本を務め、1969年1月1日に公開され、ミヒャエル・コールハースを原作としています。"
-    test = "「涼宮ハルヒの消失」は、の制作会社が京都アニメーション、脚本家が志茂文彦、監督が石原立也と武本康弘である作品です"
+    # test = "「涼宮ハルヒの消失」は、の制作会社が京都アニメーション、脚本家が志茂文彦、監督が石原立也と武本康弘である作品です"
     seg = BunsetsuSegmenter()
     for b in seg.segment(test):
         print(b)
