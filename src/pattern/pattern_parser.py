@@ -5,21 +5,36 @@
 # - grammar.lark は最新版（parallel_chain / mod_parallel_count / block_repeat の仕様反映）
 # - pattern_nodes.py は最新版（GapNode / ModifierParallelNode(count対応) を含む）
 
-from lark import Lark, Transformer, v_args
-from pattern_nodes import (
-    PatternNode,
-    SequenceNode,
-    VariableNode,
-    LiteralNode,
-    GapNode,
-    ParallelNode,
-    ModifierRepeatNode,
-    ModifierParallelNode,
-    ModifierSingleNode,
-    ModifierBlockRepeatNode,
-)
-
 import os
+from lark import Lark, Transformer, v_args
+
+try:
+    from .pattern_nodes import (
+        PatternNode,
+        SequenceNode,
+        VariableNode,
+        LiteralNode,
+        GapNode,
+        ParallelNode,
+        ModifierRepeatNode,
+        ModifierParallelNode,
+        ModifierSingleNode,
+        ModifierBlockRepeatNode,
+    )
+except ImportError:
+    # 直接実行などで相対インポートが失敗する場合のフォールバック
+    from pattern_nodes import (
+        PatternNode,
+        SequenceNode,
+        VariableNode,
+        LiteralNode,
+        GapNode,
+        ParallelNode,
+        ModifierRepeatNode,
+        ModifierParallelNode,
+        ModifierSingleNode,
+        ModifierBlockRepeatNode,
+    )
 
 # Ensure grammar.lark can be found regardless of current working directory
 GRAMMAR_FILE = os.path.join(os.path.dirname(__file__), "grammar.lark")
