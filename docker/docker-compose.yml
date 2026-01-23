@@ -24,9 +24,7 @@ services:
 
     environment:
       - CUDA_VISIBLE_DEVICES=0
-      # ★追加：hf_transfer を使わない（無いと落ちるため）
       - HF_HUB_ENABLE_HF_TRANSFER=0
-      # ★追加：HFキャッシュの場所を固定（ログ/再現性のため）
       - HF_HOME=/workspace/.cache/huggingface
       - TRANSFORMERS_CACHE=/workspace/.cache/huggingface/transformers
       - HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets
@@ -42,7 +40,9 @@ services:
 
     depends_on:
       - llmjp
+      - llmjp_onto
 
+  # 既存: CKY 並列検証などに使う llm-jp
   llmjp:
     image: vllm/vllm-openai:latest
     container_name: mi24a008-llmjp-vllm
@@ -57,7 +57,6 @@ services:
     environment:
       - HF_HOME=/root/.cache/huggingface
       - TRANSFORMERS_CACHE=/root/.cache/huggingface/transformers
-      # ★変更：ここも 0 推奨（hf_transfer 無いと落ちる）
       - HF_HUB_ENABLE_HF_TRANSFER=0
 
     ports:
@@ -88,6 +87,53 @@ services:
             - driver: nvidia
               capabilities: [gpu]
               device_ids: ["1"]
+
+  # 追加: オントロジー整合性検証用 llm-jp（別GPU・別ポート）
+  llmjp_onto:
+    image: vllm/vllm-openai:latest
+    container_name: mi24a008-llmjp-vllm-onto
+    ipc: host
+
+    volumes:
+      - hf_cache:/root/.cache
+
+    env_file:
+      - .env
+
+    environment:
+      - HF_HOME=/root/.cache/huggingface
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/transformers
+      - HF_HUB_ENABLE_HF_TRANSFER=0
+
+    # ホスト側は 8001、コンテナ内は 8000 のまま
+    ports:
+      - "8001:8000"
+
+    command:
+      - --model
+      - llm-jp/llm-jp-3.1-13b-instruct4
+      - --served-model-name
+      - llmjp-13b-onto
+      - --dtype
+      - half
+      - --max-model-len
+      - "4096"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --gpu-memory-utilization
+      - "0.90"
+      - --api-key
+      - local-token
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              device_ids: ["2"]
 
 volumes:
   hf_cache:

@@ -50,6 +50,7 @@ ja_ginza
 nltk
 gensim
 sentencepiece
+lark
 
 # =========================
 # 可視化（任意）
