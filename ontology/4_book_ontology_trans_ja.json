@@ -1,0 +1,224 @@
+{
+  "title": "Book Ontology",
+  "id": "ont_4_book",
+  "concepts": [
+    {
+      "qid": "Q571",
+      "label": "book",
+      "label_ja": "本",
+      "label_wiki_ja": "本"
+    },
+    {
+      "qid": "Q7725634",
+      "label": "literary work",
+      "label_ja": "文学作品",
+      "label_wiki_ja": "文学作品"
+    },
+    {
+      "qid": "Q482980",
+      "label": "author",
+      "label_ja": "著者",
+      "label_wiki_ja": "作家"
+    },
+    {
+      "qid": "Q2085381",
+      "label": "publisher",
+      "label_ja": "出版社",
+      "label_wiki_ja": "出版社"
+    },
+    {
+      "qid": "Q33057",
+      "label": "International Standard Book Number",
+      "label_ja": "国際標準図書番号",
+      "label_wiki_ja": "None JP Label"
+    },
+    {
+      "qid": "Q7075",
+      "label": "library",
+      "label_ja": "図書館",
+      "label_wiki_ja": "図書館"
+    },
+    {
+      "qid": "Q205892",
+      "label": "calender date",
+      "label_ja": "日付",
+      "label_wiki_ja": "日付"
+    },
+    {
+      "qid": "Q11424",
+      "label": "film",
+      "label_ja": "映画",
+      "label_wiki_ja": "映画"
+    },
+    {
+      "qid": "Q95074",
+      "label": "fictional character",
+      "label_ja": "架空のキャラクター",
+      "label_wiki_ja": "架空のキャラクター"
+    },
+    {
+      "qid": "Q36180",
+      "label": "writer",
+      "label_ja": "作家",
+      "label_wiki_ja": "著作家"
+    },
+    {
+      "qid": "Q5633421",
+      "label": "scientific journal",
+      "label_ja": "科学学術雑誌",
+      "label_wiki_ja": "科学学術雑誌"
+    },
+    {
+      "qid": "Q191067",
+      "label": "article",
+      "label_ja": "記事",
+      "label_wiki_ja": "記事"
+    },
+    {
+      "qid": "Q5",
+      "label": "human",
+      "label_ja": "ヒト",
+      "label_wiki_ja": "ヒト"
+    },
+    {
+      "qid": "Q223393",
+      "label": "literary genre",
+      "label_ja": "文学作品のジャンル",
+      "label_wiki_ja": "文学作品のジャンル"
+    },
+    {
+      "qid": "Q732577",
+      "label": "publication",
+      "label_ja": "出版",
+      "label_wiki_ja": "出版物"
+    },
+    {
+      "qid": "Q685935",
+      "label": "trade magazine",
+      "label_ja": "貿易雑誌",
+      "label_wiki_ja": "業界誌"
+    },
+    {
+      "qid": "Q34770",
+      "label": "language",
+      "label_ja": "言語",
+      "label_wiki_ja": "言語"
+    },
+    {
+      "qid": "Q15621286",
+      "label": "intellectual work",
+      "label_ja": "知的仕事",
+      "label_wiki_ja": "知的創作物"
+    },
+    {
+      "qid": "Q6256",
+      "label": "country",
+      "label_ja": "国",
+      "label_wiki_ja": "国"
+    },
+    {
+      "qid": "Q4835091",
+      "label": "territory",
+      "label_ja": "地域",
+      "label_wiki_ja": "領域"
+    }
+  ],
+  "relations": [
+    {
+      "pid": "P110",
+      "label": "illustrator",
+      "domain": "Q47461344",
+      "range": "Q5",
+      "label_ja": "イラストレーター",
+      "label_wiki_ja": "挿絵画家"
+    },
+    {
+      "pid": "P156",
+      "label": "followed by",
+      "domain": "Q47461344",
+      "range": "Q47461344",
+      "label_ja": "続く",
+      "label_wiki_ja": "次"
+    },
+    {
+      "pid": "P577",
+      "label": "publication date",
+      "domain": "Q571",
+      "range": "",
+      "label_ja": "公開日",
+      "label_wiki_ja": "出版日"
+    },
+    {
+      "pid": "P50",
+      "label": "author",
+      "domain": "Q571",
+      "range": "Q5",
+      "label_ja": "著者",
+      "label_wiki_ja": "著者"
+    },
+    {
+      "pid": "P123",
+      "label": "publisher",
+      "domain": "Q571",
+      "range": "Q2085381",
+      "label_ja": "出版社",
+      "label_wiki_ja": "出版元"
+    },
+    {
+      "pid": "P674",
+      "label": "characters",
+      "domain": "Q7725634",
+      "range": "Q95074",
+      "label_ja": "文字",
+      "label_wiki_ja": "登場人物"
+    },
+    {
+      "pid": "P98",
+      "label": "editor",
+      "domain": "Q685935",
+      "range": "Q5",
+      "label_ja": "エディタ",
+      "label_wiki_ja": "編者"
+    },
+    {
+      "pid": "P291",
+      "label": "place of publication",
+      "domain": "Q47461344",
+      "range": "Q82794",
+      "label_ja": "出版地",
+      "label_wiki_ja": "出版地"
+    },
+    {
+      "pid": "P840",
+      "label": "narrative location",
+      "domain": "Q7725634",
+      "range": "Q4835091",
+      "label_ja": "物語の場所",
+      "label_wiki_ja": "物語の舞台"
+    },
+    {
+      "pid": "P136",
+      "label": "genre",
+      "domain": "Q7725634",
+      "range": "Q223393",
+      "label_ja": "ジャンル",
+      "label_wiki_ja": "ジャンル"
+    },
+    {
+      "pid": "P407",
+      "label": "language of work or name",
+      "domain": "Q7725634",
+      "range": "Q34770",
+      "label_ja": "仕事または名前の言語",
+      "label_wiki_ja": "作品または名前の言語"
+    },
+    {
+      "pid": "P180",
+      "label": "depicts",
+      "domain": "Q47461344",
+      "range": "",
+      "label_ja": "描写します",
+      "label_wiki_ja": "題材"
+    }
+  ]
+}

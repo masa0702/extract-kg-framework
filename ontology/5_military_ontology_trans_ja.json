@@ -1,0 +1,158 @@
+{
+  "title": "Military Ontology",
+  "id": "ont_5_military",
+  "concepts": [
+    {
+      "qid": "Q4189293",
+      "label": "rank",
+      "label_ja": "組織内の階級",
+      "label_wiki_ja": "組織内の階級"
+    },
+    {
+      "qid": "Q56019",
+      "label": "military rank",
+      "label_ja": "軍隊の階級",
+      "label_wiki_ja": "軍隊の階級"
+    },
+    {
+      "qid": "Q1184840",
+      "label": "military vehicle",
+      "label_ja": "軍用車両",
+      "label_wiki_ja": "軍用車両"
+    },
+    {
+      "qid": "Q176799",
+      "label": "military unit",
+      "label_ja": "軍隊の構成単位",
+      "label_wiki_ja": "軍隊の構成単位"
+    },
+    {
+      "qid": "Q5",
+      "label": "human",
+      "label_ja": "ヒト",
+      "label_wiki_ja": "ヒト"
+    },
+    {
+      "qid": "Q6256",
+      "label": "country",
+      "label_ja": "国",
+      "label_wiki_ja": "国"
+    },
+    {
+      "qid": "Q16861376",
+      "label": "military casualty classification",
+      "label_ja": "軍事死傷者分類",
+      "label_wiki_ja": "None JP Label"
+    },
+    {
+      "qid": "Q17149090",
+      "label": "armed organization",
+      "label_ja": "武装組織",
+      "label_wiki_ja": "武装組織"
+    },
+    {
+      "qid": "Q2008856",
+      "label": "command",
+      "label_ja": "コマンド",
+      "label_wiki_ja": "コマンド"
+    },
+    {
+      "qid": "Q2772772",
+      "label": "military museum",
+      "label_ja": "軍事博物館",
+      "label_wiki_ja": "軍事博物館"
+    },
+    {
+      "qid": "Q43229",
+      "label": "organization",
+      "label_ja": "組織",
+      "label_wiki_ja": "組織"
+    },
+    {
+      "qid": "Q47064",
+      "label": "military personnel",
+      "label_ja": "軍人",
+      "label_wiki_ja": "軍人"
+    },
+    {
+      "qid": "Q18643213",
+      "label": "military equipment",
+      "label_ja": "軍装備品",
+      "label_wiki_ja": "軍装備品"
+    }
+  ],
+  "relations": [
+    {
+      "pid": "P410",
+      "label": "military rank",
+      "domain": "Q5",
+      "range": "Q56019",
+      "label_ja": "軍隊の階級",
+      "label_wiki_ja": "軍隊の階級"
+    },
+    {
+      "pid": "P241",
+      "label": "military branch",
+      "domain": "Q5",
+      "range": "Q176799",
+      "label_ja": "軍種",
+      "label_wiki_ja": "軍種"
+    },
+    {
+      "pid": "P1347",
+      "label": "military casualty classification ",
+      "domain": "Q5",
+      "range": "Q16861376",
+      "label_ja": "軍死傷者分類",
+      "label_wiki_ja": "軍死傷者分類"
+    },
+    {
+      "pid": "P287",
+      "label": "designed by",
+      "domain": "Q18643213",
+      "range": "Q43229",
+      "label_ja": "デザイン",
+      "label_wiki_ja": "デザイン"
+    },
+    {
+      "pid": "P287",
+      "label": "designed by",
+      "domain": "Q1184840",
+      "range": "Q43229",
+      "label_ja": "デザイン",
+      "label_wiki_ja": "デザイン"
+    },
+    {
+      "pid": "P4791",
+      "label": "commanded by",
+      "domain": "Q2008856",
+      "range": "Q5",
+      "label_ja": "指揮官",
+      "label_wiki_ja": "指揮官"
+    },
+    {
+      "pid": "P3730",
+      "label": "next higher rank",
+      "domain": "Q56019",
+      "range": "Q4189293",
+      "label_ja": "直上の階級",
+      "label_wiki_ja": "直上の階級"
+    },
+    {
+      "pid": "P3461",
+      "label": "designated as terrorist by",
+      "domain": "Q17149090",
+      "range": "Q6256",
+      "label_ja": "テロ組織と認定した国",
+      "label_wiki_ja": "テロ組織と認定した国"
+    },
+    {
+      "pid": "P1654",
+      "label": "wing configuration",
+      "domain": "Q11436",
+      "range": "",
+      "label_ja": "翼構成",
+      "label_wiki_ja": "翼構成"
+    }
+  ]
+}

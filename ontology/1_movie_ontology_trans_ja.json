@@ -5,62 +5,74 @@
     {
       "qid": "Q5",
       "label": "human",
-      "label_ja": "人間"
+      "label_ja": "ヒト",
+      "label_wiki_ja": "ヒト"
     },
     {
       "qid": "Q515",
       "label": "city",
-      "label_ja": "市"
+      "label_ja": "都市",
+      "label_wiki_ja": "都市"
     },
     {
       "qid": "Q6256",
       "label": "country",
-      "label_ja": "国"
+      "label_ja": "国",
+      "label_wiki_ja": "国"
     },
     {
       "qid": "Q11424",
       "label": "film",
-      "label_ja": "映画"
+      "label_ja": "映画",
+      "label_wiki_ja": "映画"
     },
     {
       "qid": "Q201658",
       "label": "film genre",
-      "label_ja": "映画ジャンル"
+      "label_ja": "映画のジャンル",
+      "label_wiki_ja": "映画のジャンル"
     },
     {
       "qid": "Q483394",
       "label": "genre",
-      "label_ja": "ジャンル"
+      "label_ja": "ジャンル",
+      "label_wiki_ja": "ジャンル"
     },
     {
       "qid": "Q1762059",
       "label": "film production company",
-      "label_ja": "映画制作会社"
+      "label_ja": "映画制作会社",
+      "label_wiki_ja": "映画製作会社"
     },
     {
       "qid": "Q4220917",
       "label": "film award",
-      "label_ja": "映画賞"
+      "label_ja": "映画賞",
+      "label_wiki_ja": "映画賞"
     },
     {
       "qid": "Q618779",
       "label": "award",
-      "label_ja": "賞"
+      "label_ja": "賞",
+      "label_wiki_ja": "賞"
     },
     {
       "qid": "Q47461344",
       "label": "written work",
-      "label_ja": "脚本"
+      "label_ja": "著作物",
+      "label_wiki_ja": "著作物"
     },
     {
       "qid": "Q15773347",
       "label": "film character",
-      "label_ja": "映画のキャラクター"
+      "label_ja": "映画の登場人物",
+      "label_wiki_ja": "映画の登場人物"
     },
     {
       "qid": "Q104649845",
       "label": "film organization",
-      "label_ja": "映画会社"
+      "label_ja": "映画の団体",
+      "label_wiki_ja": "映画の団体"
     }
   ],
   "relations": [
@@ -69,105 +81,120 @@
       "label": "director",
       "domain": "Q11424",
       "range": "Q5",
-      "label_ja": "監督"
+      "label_ja": "監督",
+      "label_wiki_ja": "監督"
     },
     {
       "pid": "P58",
       "label": "screenwriter",
       "domain": "Q11424",
       "range": "Q5",
-      "label_ja": "脚本家"
+      "label_ja": "脚本家",
+      "label_wiki_ja": "脚本"
     },
     {
       "pid": "P136",
       "label": "genre",
       "domain": "Q11424",
       "range": "Q483394",
-      "label_ja": "ジャンル"
+      "label_ja": "ジャンル",
+      "label_wiki_ja": "ジャンル"
     },
     {
       "pid": "P144",
       "label": "based on",
       "domain": "Q11424",
       "range": "Q47461344",
-      "label_ja": "派生元"
+      "label_ja": "基づく",
+      "label_wiki_ja": "派生元"
     },
     {
       "pid": "P161",
       "label": "cast member",
       "domain": "Q11424",
       "range": "Q5",
-      "label_ja": "出演者"
+      "label_ja": "キャストメンバー",
+      "label_wiki_ja": "出演者"
     },
     {
       "pid": "P166",
       "label": "award received",
       "domain": "Q11424",
       "range": "Q618779",
-      "label_ja": "受賞"
+      "label_ja": "受賞",
+      "label_wiki_ja": "受賞・受章"
     },
     {
       "pid": "P272",
       "label": "production company",
       "domain": "Q11424",
       "range": "Q1762059",
-      "label_ja": "制作会社"
+      "label_ja": "制作会社",
+      "label_wiki_ja": "制作会社"
     },
     {
       "pid": "P495",
       "label": "country of origin",
       "domain": "Q11424",
       "range": "Q6256",
-      "label_ja": "原産国"
+      "label_ja": "原産国",
+      "label_wiki_ja": "本国"
     },
     {
       "pid": "P577",
       "label": "publication date",
       "domain": "Q11424",
       "range": "",
-      "label_ja": "公開日"
+      "label_ja": "公開日",
+      "label_wiki_ja": "出版日"
     },
     {
       "pid": "P674",
       "label": "characters",
       "domain": "Q11424",
       "range": "Q15773347",
-      "label_ja": "キャラクター"
+      "label_ja": "文字",
+      "label_wiki_ja": "登場人物"
     },
     {
       "pid": "P840",
       "label": "narrative location",
       "domain": "Q11424",
       "range": "Q515",
-      "label_ja": "物語の舞台"
+      "label_ja": "物語の場所",
+      "label_wiki_ja": "物語の舞台"
     },
     {
       "pid": "P915",
       "label": "filming location",
       "domain": "Q11424",
       "range": "Q515",
-      "label_ja": "撮影場所"
+      "label_ja": "撮影場所",
+      "label_wiki_ja": "撮影地"
     },
     {
       "pid": "P921",
       "label": "main subject",
       "domain": "Q11424",
       "range": "",
-      "label_ja": "主な主題"
+      "label_ja": "主な主題",
+      "label_wiki_ja": "主題"
     },
     {
       "pid": "P1411",
       "label": "nominated for",
       "domain": "Q11424",
       "range": "Q618779",
-      "label_ja": "ノミネート"
+      "label_ja": "ノミネートされました",
+      "label_wiki_ja": "ノミネート"
     },
     {
       "pid": "P2130",
       "label": "cost",
       "domain": "Q11424",
       "range": "",
-      "label_ja": "費用"
+      "label_ja": "料金",
+      "label_wiki_ja": "費用"
     }
   ]
 }

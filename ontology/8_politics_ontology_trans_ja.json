@@ -1,0 +1,158 @@
+{
+  "title": "Politics Ontology",
+  "id": "ont_8_politics",
+  "concepts": [
+    {
+      "qid": "Q7188",
+      "label": "government",
+      "label_ja": "政府",
+      "label_wiki_ja": "政府"
+    },
+    {
+      "qid": "Q4164871",
+      "label": "position",
+      "label_ja": "職位",
+      "label_wiki_ja": "職位"
+    },
+    {
+      "qid": "Q48352",
+      "label": "head of state",
+      "label_ja": "元首",
+      "label_wiki_ja": "元首"
+    },
+    {
+      "qid": "Q2285706",
+      "label": "head of government",
+      "label_ja": "政府の長",
+      "label_wiki_ja": "政府の長"
+    },
+    {
+      "qid": "Q7278",
+      "label": "political party",
+      "label_ja": "政党",
+      "label_wiki_ja": "政党"
+    },
+    {
+      "qid": "Q40231",
+      "label": "Public election",
+      "label_ja": "選挙",
+      "label_wiki_ja": "選挙"
+    },
+    {
+      "qid": "Q7275",
+      "label": "state",
+      "label_ja": "国家",
+      "label_wiki_ja": "国家"
+    },
+    {
+      "qid": "Q5",
+      "label": "human",
+      "label_ja": "ヒト",
+      "label_wiki_ja": "ヒト"
+    },
+    {
+      "qid": "Q28819924",
+      "label": "political alignment",
+      "label_ja": "政治的立場",
+      "label_wiki_ja": "政治的立場"
+    },
+    {
+      "qid": "Q43229",
+      "label": "organization",
+      "label_ja": "組織",
+      "label_wiki_ja": "組織"
+    },
+    {
+      "qid": "Q30461",
+      "label": "president",
+      "label_ja": "大統領",
+      "label_wiki_ja": "大統領"
+    },
+    {
+      "qid": "Q6256",
+      "label": "country",
+      "label_ja": "国",
+      "label_wiki_ja": "国"
+    },
+    {
+      "qid": "Q12909644",
+      "label": "political ideology",
+      "label_ja": "政治イデオロギー",
+      "label_wiki_ja": "政治イデオロギー"
+    }
+  ],
+  "relations": [
+    {
+      "pid": "P35",
+      "label": "head of state",
+      "domain": "Q6256",
+      "range": "Q5",
+      "label_ja": "元首",
+      "label_wiki_ja": "元首"
+    },
+    {
+      "pid": "P6",
+      "label": "head of government",
+      "domain": "Q6256",
+      "range": "Q5",
+      "label_ja": "行政府の長",
+      "label_wiki_ja": "行政府の長"
+    },
+    {
+      "pid": "P39",
+      "label": "position held",
+      "domain": "Q5",
+      "range": "Q30461",
+      "label_ja": "公職",
+      "label_wiki_ja": "公職"
+    },
+    {
+      "pid": "P463",
+      "label": "Member of",
+      "domain": "Q5",
+      "range": "Q43229",
+      "label_ja": "所属グループ",
+      "label_wiki_ja": "所属グループ"
+    },
+    {
+      "pid": "P1387",
+      "label": "political alignment",
+      "domain": "Q7278",
+      "range": "Q28819924",
+      "label_ja": "政治的立場",
+      "label_wiki_ja": "政治的立場"
+    },
+    {
+      "pid": "P102",
+      "label": "member of political party",
+      "domain": "Q5",
+      "range": "Q7278",
+      "label_ja": "所属政党",
+      "label_wiki_ja": "所属政党"
+    },
+    {
+      "pid": "P2715",
+      "label": "elected in",
+      "domain": "Q5",
+      "range": "Q40231",
+      "label_ja": "選出選挙",
+      "label_wiki_ja": "選出選挙"
+    },
+    {
+      "pid": "P3602",
+      "label": "candidacy in election",
+      "domain": "Q5",
+      "range": "Q40231",
+      "label_ja": "立候補選挙",
+      "label_wiki_ja": "立候補選挙"
+    },
+    {
+      "pid": "P1142",
+      "label": "political ideology",
+      "domain": "Q7278",
+      "range": "Q12909644",
+      "label_ja": "政治イデオロギー",
+      "label_wiki_ja": "政治イデオロギー"
+    }
+  ]
+}

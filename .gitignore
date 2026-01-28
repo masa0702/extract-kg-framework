@@ -192,6 +192,6 @@ fix*/
 parallel*/
 results/
 translate*/
-ontology/
+# ontology/
 data/
 learn_data/

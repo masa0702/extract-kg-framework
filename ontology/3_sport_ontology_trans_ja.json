@@ -1,0 +1,216 @@
+{
+  "title": "Sports Ontology",
+  "id": "ont_3_sport",
+  "concepts": [
+    {
+      "qid": "Q5",
+      "label": "human",
+      "label_ja": "ヒト",
+      "label_wiki_ja": "ヒト"
+    },
+    {
+      "qid": "Q50995749",
+      "label": "sportsperson",
+      "label_ja": "スポーツ関係者",
+      "label_wiki_ja": "スポーツ関係者"
+    },
+    {
+      "qid": "Q327245",
+      "label": "team",
+      "label_ja": "チーム",
+      "label_wiki_ja": "チーム"
+    },
+    {
+      "qid": "Q2066131",
+      "label": "athlete",
+      "label_ja": "アスリート",
+      "label_wiki_ja": "スポーツ選手"
+    },
+    {
+      "qid": "Q349",
+      "label": "sport",
+      "label_ja": "スポーツ",
+      "label_wiki_ja": "スポーツ"
+    },
+    {
+      "qid": "Q6256",
+      "label": "country",
+      "label_ja": "国",
+      "label_wiki_ja": "国"
+    },
+    {
+      "qid": "Q4438121",
+      "label": "sports organization",
+      "label_ja": "スポーツ組織",
+      "label_wiki_ja": "スポーツ組織"
+    },
+    {
+      "qid": "Q27020041",
+      "label": "sports team season",
+      "label_ja": "スポーツシーズン",
+      "label_wiki_ja": "スポーツシーズン"
+    },
+    {
+      "qid": "Q847017",
+      "label": "sports club",
+      "label_ja": "スポーツクラブ",
+      "label_wiki_ja": "スポーツクラブ"
+    },
+    {
+      "qid": "Q1154710",
+      "label": "association football venue",
+      "label_ja": "サッカースタジアム",
+      "label_wiki_ja": "サッカースタジアム"
+    },
+    {
+      "qid": "Q16510064",
+      "label": "sporting event",
+      "label_ja": "スポーツ大会",
+      "label_wiki_ja": "スポーツ大会"
+    },
+    {
+      "qid": "Q167170",
+      "label": "multi-sport event",
+      "label_ja": "総合競技大会",
+      "label_wiki_ja": "総合競技大会"
+    },
+    {
+      "qid": "Q2485448",
+      "label": "sports governing body",
+      "label_ja": "国内競技連盟",
+      "label_wiki_ja": "国内競技連盟"
+    },
+    {
+      "qid": "Q747883",
+      "label": "physical activity",
+      "label_ja": "身体活動",
+      "label_wiki_ja": "身体活動"
+    },
+    {
+      "qid": "Q2312410",
+      "label": "sports discipline",
+      "label_ja": "スポーツ種別",
+      "label_wiki_ja": "スポーツ種別"
+    },
+    {
+      "qid": "Q27020041",
+      "label": "sports season",
+      "label_ja": "スポーツシーズン",
+      "label_wiki_ja": "スポーツシーズン"
+    },
+    {
+      "qid": "Q15991290",
+      "label": "professional sports league",
+      "label_ja": "プロスポーツリーグ",
+      "label_wiki_ja": "プロスポーツリーグ"
+    },
+    {
+      "qid": "Q13406554",
+      "label": "sports competition",
+      "label_ja": "スポーツ競技大会",
+      "label_wiki_ja": "スポーツ競技大会"
+    },
+    {
+      "qid": "Q847017",
+      "label": "sports club",
+      "label_ja": "スポーツクラブ",
+      "label_wiki_ja": "スポーツクラブ"
+    },
+    {
+      "qid": "Q1539532",
+      "label": "sports season of a sports club",
+      "label_ja": "クラブやチームのシーズン",
+      "label_wiki_ja": "クラブやチームのシーズン"
+    }
+  ],
+  "relations": [
+    {
+      "pid": "P106",
+      "label": "occupation",
+      "domain": "Q5",
+      "range": "Q2066131",
+      "label_ja": "職業",
+      "label_wiki_ja": "職業"
+    },
+    {
+      "pid": "P641",
+      "label": "sport",
+      "domain": "Q13406554",
+      "range": "Q349",
+      "label_ja": "スポーツ",
+      "label_wiki_ja": "スポーツ"
+    },
+    {
+      "pid": "P54",
+      "label": "member of sports team",
+      "domain": "Q5",
+      "range": "Q847017",
+      "label_ja": "スポーツチームのメンバー",
+      "label_wiki_ja": "所属チーム"
+    },
+    {
+      "pid": "P1532",
+      "label": "country for sport",
+      "domain": "Q5",
+      "range": "Q6256",
+      "label_ja": "スポーツのための国",
+      "label_wiki_ja": "代表国"
+    },
+    {
+      "pid": "P3450",
+      "label": "sports season of league or competition",
+      "domain": "Q27020041",
+      "range": "Q500834",
+      "label_ja": "リーグや競争のスポーツシーズン",
+      "label_wiki_ja": "リーグや競技のスポーツシーズン"
+    },
+    {
+      "pid": "P6087",
+      "label": "coach of sports team",
+      "domain": "Q5",
+      "range": "Q847017",
+      "label_ja": "スポーツチームのコーチ",
+      "label_wiki_ja": "スポーツチームのコーチ"
+    },
+    {
+      "pid": "P118",
+      "label": "league",
+      "domain": "Q5",
+      "range": "Q15991290",
+      "label_ja": "リーグ",
+      "label_wiki_ja": "リーグ"
+    },
+    {
+      "pid": "P159",
+      "label": "home venue",
+      "domain": "Q847017",
+      "range": "Q23764314",
+      "label_ja": "ホーム会場",
+      "label_wiki_ja": "本部所在地"
+    },
+    {
+      "pid": "P495",
+      "label": "country of origin ",
+      "domain": "Q349",
+      "range": "Q6256",
+      "label_ja": "原産国",
+      "label_wiki_ja": "本国"
+    },
+    {
+      "pid": "P118",
+      "label": "league",
+      "domain": "Q5",
+      "range": "Q623109",
+      "label_ja": "リーグ",
+      "label_wiki_ja": "リーグ"
+    },
+    {
+      "pid": "P2094",
+      "label": "competition class",
+      "domain": "Q4438121",
+      "range": "",
+      "label_ja": "競技クラス",
+      "label_wiki_ja": "競技分類"
+    }
+  ]
+}
