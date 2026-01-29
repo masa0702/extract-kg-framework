@@ -12,6 +12,9 @@
 # ⑥ 可視化ログ（どのASTがどの文に適用され、どの変数が何を拾ったか）をCSV追記
 # =============================================================
 
+# main.py（省略なし：長いのでそのまま全体を貼る方針に合わせています）
+# ※あなたの手元コードと同名ファイルを置き換えてください
+
 import os
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
@@ -33,7 +36,6 @@ from multiprocessing.connection import Connection
 
 import torch
 
-# ---------- 既存モジュール ----------
 from pattern.pattern_nodes import (
     ParallelNode,
     VariableNode,
@@ -48,9 +50,6 @@ from modules_core.utils import MyUtility
 from llm.parallel_judge import ParallelJudgeLLMJP
 from config.filter_settings import PARALLEL_KEYS
 
-# =============================================================
-# 定数
-# =============================================================
 AST_PICKLE      = "../data/patterns/swopatterns_ast.pkl.gz"
 INPUT_SENT_CSV  = "../data/target_datas/swo_target_data.csv"
 
@@ -62,11 +61,8 @@ output_dir = f"../results/extract_pred_arg_pair/{dir_name}/{prefix}/"
 dep_json_path  = f"{output_dir}{prefix}_dependency_analysis.json"
 cky_json_path  = f"{output_dir}{prefix}_dependency_analysis_with_cky.json"
 RESULT_CSV     = f"{output_dir}{prefix}_extract_po_pair.csv"
-
-# ★ 可視化CSV（追加）
 VIS_CSV        = f"{output_dir}{prefix}_ast_visualization.csv"
 
-# 診断ログの保存先
 LOG_DIR = os.path.join(output_dir, "logs")
 SENT_STATS_CSV = os.path.join(LOG_DIR, f"{prefix}_sentence_stats.csv")
 GPU_TIMING_CSV = os.path.join(LOG_DIR, f"{prefix}_gpu_timing.csv")
@@ -79,19 +75,14 @@ EXCLUDE_POS = ["助詞", "接続詞", "助動詞",
                "補助記号-句点", "補助記号-読点",
                "記号-句点", "記号-読点"]
 
-# ---- 制限・スロット数 ----
-GPU_WORKERS            = 2             # 同時GPUスロット
-GPU_TIMEOUT_SEC        = 4000000000    # 1文のGPU解析ウォッチドッグ
-CPU_WORKERS            = max(4, min(64, (os.cpu_count() or 8) - 2))  # 同時CPUスロット
-CPU_TOTAL_TIMEOUT_SEC  = 1000000000    # 1文のCPU（フィルタ+マッチング）合算上限
+GPU_WORKERS            = 2
+GPU_TIMEOUT_SEC        = 4000000000
+CPU_WORKERS            = max(4, min(64, (os.cpu_count() or 8) - 2))
+CPU_TOTAL_TIMEOUT_SEC  = 1000000000
 
-# ---- フィルタ高速化パラメタ ----
-LIT_MAX_FREQ            = 20           # 高頻度リテラルはフィルタ判定から除外
-CAND_SPAN_LIMIT_PER_AST = 1000         # （未使用だが将来の上限用プレースホルダ）
+LIT_MAX_FREQ            = 20
+CAND_SPAN_LIMIT_PER_AST = 1000
 
-# =============================================================
-# ユーティリティ（共通）
-# =============================================================
 def extract_parallel_variables(ast):
     vars_ = []
     def visit(node):
@@ -176,16 +167,12 @@ def literals_in_order_within_span(literals, lit_pos_map, span_start, span_end):
     return True
 
 def get_ast_uid(ast) -> str:
-    """AST構造から安定IDを生成（可視化のため）"""
     try:
         b = pickle.dumps(ast, protocol=pickle.HIGHEST_PROTOCOL)
     except Exception:
         b = repr(ast).encode("utf-8", errors="ignore")
     return hashlib.md5(b).hexdigest()[:16]
 
-# =============================================================
-# GPU 子プロセス：1文のCKY解析
-# =============================================================
 def gpu_child_worker(row_payload, device_id: int, conn: Connection):
     try:
         if torch.cuda.is_available():
@@ -228,9 +215,6 @@ def gpu_child_worker(row_payload, device_id: int, conn: Connection):
         except Exception:
             pass
 
-# =============================================================
-# CPU 子プロセス：1文のフィルタ+マッチング
-# =============================================================
 def cpu_child_worker(payload, ast_dict, conn: Connection):
     try:
         judge = ParallelJudgeLLMJP()
@@ -238,18 +222,15 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
         cky_dep  = payload["cky_dep"]; clauses = payload["clauses"]
         B = len(clauses)
 
-        # 候補AST（var_count>=2）
         candidate_asts = []
         for v in range(2, B+1):
             if v in ast_dict:
                 candidate_asts.extend(ast_dict[v])
 
-        # 文テキスト＆境界
         sent_text, starts = build_sentence_text_and_offsets(clauses)
         total_len = len(sent_text)
         full_start, full_end = 0, total_len
 
-        # 事前インデクス
         par_starts = []
         for k in PARALLEL_KEYS:
             if k:
@@ -264,7 +245,6 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
             if lits: uniq_literals.update(lits)
         lit_pos_map = {lit: find_all_occurrences(sent_text, lit) for lit in uniq_literals}
 
-        # 粗フィルタ（全文）
         coarse_pass = []
         for entry in candidate_asts:
             literals  = entry.get("literal_list", [])
@@ -276,7 +256,6 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
             coarse_pass.append(entry)
         candidate_asts = coarse_pass
 
-        # リテラル主導で候補セル生成
         t0 = time.time()
         filtered = []
 
@@ -285,7 +264,6 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
             literals  = entry.get("literal_list", [])
             par_cnt   = entry.get("parallel_var_count", 0)
 
-            # 実効リテラル（高頻度除外）
             eff_lits = []
             if literals:
                 for lit in literals:
@@ -297,8 +275,8 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                 if not eff_lits:
                     eff_lits = [max(literals, key=len)]
 
-            # 候補 (i,j)
-            cand_ij = []
+            # 候補 (i,j)（まずは素のspanだけ。拡張は passed 後に行う）
+            cand_ij_base = []
             if eff_lits:
                 first = eff_lits[0]
                 first_pos = lit_pos_map.get(first, [])
@@ -316,16 +294,13 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                     i = max(0, bisect_right(starts, span_start) - 1)
                     j = max(0, bisect_left(starts, span_end) - 1)
                     if j <= i: j = min(B - 1, i + 1)
-                    cand_ij.append((i, j))
-                    if i > 0: cand_ij.append((i - 1, j))
-                    if j < B - 1: cand_ij.append((i, j + 1))
+                    cand_ij_base.append((i, j))
             else:
-                cand_ij = [(0, B - 1)]
+                cand_ij_base = [(0, B - 1)]
 
-            # 判定
             passed = False
             seen_ij = set()
-            for (i, j) in cand_ij:
+            for (i, j) in cand_ij_base:
                 if (i, j) in seen_ij: continue
                 seen_ij.add((i, j))
                 chunk_num = j - i + 1
@@ -337,30 +312,41 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                 passed = True; break
 
             if passed:
+                # passed したものだけ span 拡張を追加（走査セル制限用）
+                cand_spans = set(cand_ij_base)
+                for (i, j) in list(cand_spans):
+                    if i > 0:
+                        cand_spans.add((i - 1, j))
+                    if j < B - 1:
+                        cand_spans.add((i, j + 1))
+
+                # CKYMatcher は 1-based なので変換して保持
+                entry["cand_spans"] = sorted(
+                    [(i + 1, j + 1) for (i, j) in cand_spans if 0 <= i <= j < B],
+                    key=lambda x: (-(x[1] - x[0]), x[0], x[1]),
+                )
                 filtered.append(entry)
 
         t_filter = time.time() - t0
 
-        # マッチング
         t1 = time.time()
         seen = set()
         recs = []
-        vis_rows = []  # ★ 可視化用
+        vis_rows = []
 
         for entry in filtered:
             ast = entry["ast"]
             matcher = CKYMatcher(ast, verbose=False)
-            for r in matcher.match_table(cky_dep):
+
+            for r in matcher.match_table(cky_dep, spans=entry.get("cand_spans")):
                 key = frozenset(r.variable_mapping.items())
-                if key in seen: 
+                if key in seen:
                     continue
                 seen.add(key)
 
-                # 変数写像（生/クリーン）
                 varmap_raw   = dict(r.variable_mapping)
                 varmap_clean = clean_variable_mapping(varmap_raw, clauses)
 
-                # 並列妥当性チェック
                 par_names = extract_parallel_variables(ast)
                 par_elems = [varmap_clean[name] for name in par_names if name in varmap_clean]
                 if par_elems:
@@ -368,18 +354,15 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                     if is_parallel is False:
                         continue
 
-                # X/Y ブロック
                 Xs = []; Ys = []
                 for k, v2 in varmap_clean.items():
                     if k.startswith("X"): Xs.append((k, v2))
                     elif k.startswith("Y"): Ys.append((k, v2))
-                # 値重複除去
                 Xs = list({xv: (xk, xv) for xk, xv in Xs}.values())
                 Ys = list({yv: (yk, yv) for yk, yv in Ys}.values())
-                if not Xs or not Ys: 
+                if not Xs or not Ys:
                     continue
 
-                # 抽出レコード（既存出力）
                 for idx, ((xk, xv), (yk, yv)) in enumerate(product(Xs, Ys)):
                     recs.append({
                         "id":           sent_id,
@@ -389,7 +372,6 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                         "arg_ja":       xv
                     })
 
-                # ★ 可視化行（AST単位で1行；X/Yは一覧として格納）
                 ast_uid  = entry.get("ast_uid", get_ast_uid(ast))
                 var_cnt  = entry.get("var_count", 0)
                 par_cnt  = entry.get("parallel_var_count", 0)
@@ -415,7 +397,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
         out = {
             "id": sent_id,
             "recs": recs,
-            "vis": vis_rows,  # ★ 追加
+            "vis": vis_rows,
             "t_filter": t_filter,
             "t_match": t_match,
             "cand_asts": len(candidate_asts),

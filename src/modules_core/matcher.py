@@ -50,8 +50,15 @@ class CKYMatcher:
         if self.verbose:
             print("[CKYMatcher]", *msg)
 
-    def match_table(self, cky) -> List[Dict[str, str]]:
-        """Return MatchResult list for cells containing pattern matches."""
+    def match_table(
+        self,
+        cky,
+        spans: Optional[Sequence[tuple[int, int]]] = None,
+    ) -> List[MatchResult]:
+        """CKY表を走査してマッチ結果を返す。
+
+        spans を与えた場合は、その (i,j)（1-based, i<=j）のセルだけを走査する。
+        """
         if hasattr(cky, "table"):
             mat = cky.table
         else:
@@ -59,29 +66,46 @@ class CKYMatcher:
 
         n = len(mat) - 1
 
-        results: List[Dict[str, str]] = []
+        results: List[MatchResult] = []
 
-        # span 長が長い方から走査
-        for span in range(n, 0, -1):
-            for i in range(1, n - span + 2):
-                j = i + span - 1
-                cell = mat[i][j]
-
-                if not isinstance(cell, dict) or "candidates" not in cell:
+        # 走査対象セルを決める（Noneなら全走査）
+        if spans is None:
+            scan_cells: List[tuple[int, int]] = []
+            # span 長が長い方から走査
+            for span in range(n, 0, -1):
+                for i in range(1, n - span + 2):
+                    j = i + span - 1
+                    scan_cells.append((i, j))
+        else:
+            # 入力 spans は 1-based 前提
+            uniq = set()
+            for i, j in spans:
+                if not (isinstance(i, int) and isinstance(j, int)):
                     continue
-                if not cell["candidates"]:
+                if i < 1 or j < 1 or i > n or j > n:
                     continue
+                if j < i:
+                    continue
+                uniq.add((i, j))
+            # 長いspanから優先的に
+            scan_cells = sorted(uniq, key=lambda x: (-(x[1] - x[0]), x[0], x[1]))
 
-                for cand in cell["candidates"]:
-                    mappings = self._match_candidate_all(cand)
-                    for mapping in mappings:
-                        results.append(
-                            MatchResult(i=i, j=j, variable_mapping=mapping, cell=cand)
-                        )
+        for i, j in scan_cells:
+            cell = mat[i][j]
+
+            if not isinstance(cell, dict) or "candidates" not in cell:
+                continue
+            if not cell["candidates"]:
+                continue
+
+            for cand in cell["candidates"]:
+                mappings = self._match_candidate_all(cand)
+                for mapping in mappings:
+                    results.append(
+                        MatchResult(i=i, j=j, variable_mapping=mapping, cell=cand)
+                    )
 
         return results
-
-
 
     # ---------- internal ----------
     # -------------------------------------------------------------
@@ -94,10 +118,22 @@ class CKYMatcher:
         matches: List[Dict[str, str]] = []
         seen = set()
 
+        # ------------------------------
+        # (1) literal を「割当列挙の前」に粗く判定（candidate.text に含まれるか）
+        # ------------------------------
+        if not self._literal_global_precheck(cand):
+            self._log("C0: literal precheck failed")
+            return []
+
+        # ------------------------------
+        # (3) dep より literal を先に落としたいので、dep はここで一度だけ
+        # ------------------------------
+        if not self._dependency_label_filter(cand):
+            self._log("B: dependency-label filter failed")
+            return []
+
         for _lp, _last in self._iter_assignments(self.pattern_ast, leaves):
-            if not self._dependency_label_filter(cand):
-                self._log("B: dependency-label filter failed")
-                continue
+            # (3) literal -> dep の順にしたいので、割当後は literal だけ精密チェック
             if not self._literal_filter(cand, leaves):
                 self._log("C: literal filter failed")
                 continue
@@ -117,6 +153,20 @@ class CKYMatcher:
             self._log("A: dynamic-index failed")
         return matches
 
+    # --- precheck : candidate.text に literal が含まれるか（割当列挙前の粗チェック） ---
+    def _literal_global_precheck(self, cand: Dict[str, Any]) -> bool:
+        literal_nodes = self.pattern_ast.get_literal_nodes()
+        if not literal_nodes:
+            return True
+        cand_text = cand.get("text", "")
+        if not cand_text:
+            # cand が text を持たないケースの保険（高コストだがここだけ）
+            cand_text = self._collect_text_recursive(cand)
+        for tokens, _leaf_idx in literal_nodes:
+            lit = "".join(tokens)
+            if lit and lit not in cand_text:
+                return False
+        return True
 
     # --- phase-1 : 依存ラベル ---
     def _dependency_label_filter(self, cand: Dict[str, Any]) -> bool:
