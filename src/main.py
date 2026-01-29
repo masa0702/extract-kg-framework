@@ -27,7 +27,7 @@ import csv
 import hashlib
 import pandas as pd
 from collections import defaultdict
-from itertools import product
+from itertools import product, combinations
 from tqdm.auto import tqdm
 from bisect import bisect_left, bisect_right
 
@@ -49,6 +49,13 @@ from modules_core.bunsetu import DependencyAnalysis
 from modules_core.utils import MyUtility
 from llm.parallel_judge import ParallelJudgeLLMJP
 from config.filter_settings import PARALLEL_KEYS
+from modules_core.ontology_verify import (
+    get_ontology_resolver,
+    get_ontology_judge,
+    render_prompt,
+    prompt_requires_pair,
+    pick_other_argument,
+)
 
 AST_PICKLE      = "../data/patterns/swopatterns_ast.pkl.gz"
 INPUT_SENT_CSV  = "../data/target_datas/swo_target_data.csv"
@@ -62,6 +69,18 @@ dep_json_path  = f"{output_dir}{prefix}_dependency_analysis.json"
 cky_json_path  = f"{output_dir}{prefix}_dependency_analysis_with_cky.json"
 RESULT_CSV     = f"{output_dir}{prefix}_extract_po_pair.csv"
 VIS_CSV        = f"{output_dir}{prefix}_ast_visualization.csv"
+TRIPLE_CSV     = f"{output_dir}{prefix}_validated_triples.csv"
+
+PROMPTS_JSON = "../prompts/prompts.json"
+RELATION_PROMPT_MAP_JSON = "../prompts/relation_prompt_map.json"
+ONTOLOGY_DIR = "../ontology"
+
+ONTOLOGY_ID_COL_CANDIDATES = [
+    "ontology_id",
+    "ontology",
+    "ontology_category",
+    "category",
+]
 
 LOG_DIR = os.path.join(output_dir, "logs")
 SENT_STATS_CSV = os.path.join(LOG_DIR, f"{prefix}_sentence_stats.csv")
@@ -198,6 +217,7 @@ def gpu_child_worker(row_payload, device_id: int, conn: Connection):
         out = {
             "id": row_payload["id"],
             "sentence": row_payload["sent"],
+            "ontology_id": row_payload.get("ontology_id", ""),
             "cky_dep": cky_dep,
             "clauses": row_payload["clauses"],
             "t_analyze": t_analyze,
@@ -218,6 +238,11 @@ def gpu_child_worker(row_payload, device_id: int, conn: Connection):
 def cpu_child_worker(payload, ast_dict, conn: Connection):
     try:
         judge = ParallelJudgeLLMJP()
+        ontology_resolver = get_ontology_resolver(
+            RELATION_PROMPT_MAP_JSON, PROMPTS_JSON, ONTOLOGY_DIR
+        )
+        ontology_judge = get_ontology_judge()
+        ontology_id = payload.get("ontology_id") or ""
         sent_id  = payload["id"]; sentence = payload["sentence"]
         cky_dep  = payload["cky_dep"]; clauses = payload["clauses"]
         B = len(clauses)
@@ -333,6 +358,8 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
         seen = set()
         recs = []
         vis_rows = []
+        triples = []
+        seen_triples = set()
 
         for entry in filtered:
             ast = entry["ast"]
@@ -363,6 +390,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                 if not Xs or not Ys:
                     continue
 
+                ast_uid  = entry.get("ast_uid", get_ast_uid(ast))
                 for idx, ((xk, xv), (yk, yv)) in enumerate(product(Xs, Ys)):
                     recs.append({
                         "id":           sent_id,
@@ -372,10 +400,149 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                         "arg_ja":       xv
                     })
 
-                ast_uid  = entry.get("ast_uid", get_ast_uid(ast))
                 var_cnt  = entry.get("var_count", 0)
                 par_cnt  = entry.get("parallel_var_count", 0)
                 literals = entry.get("literal_list", [])
+
+                # Ontology verification (pattern-level candidates)
+                x_values = [v for _, v in Xs]
+                y_values = [v for _, v in Ys]
+
+                for rel in y_values:
+                    row = ontology_resolver.resolve_relation_row(rel, ontology_id)
+                    if not row:
+                        continue
+                    prompt_id = row.get("prompt_id", "")
+                    prompt = ontology_resolver.get_prompt(prompt_id)
+                    if not prompt:
+                        continue
+
+                    domain_concept, range_concept = ontology_resolver.resolve_concepts(row, ontology_id)
+                    domain_concept = domain_concept or ""
+                    range_concept = range_concept or ""
+
+                    pid = row.get("pid", "")
+                    prompt_name = prompt.prompt_name
+
+                    if prompt_requires_pair(prompt):
+                        if len(x_values) < 2:
+                            continue
+                        if not domain_concept or not range_concept:
+                            continue
+                        for arg1, arg2 in combinations(x_values, 2):
+                            prompt_text = render_prompt(
+                                prompt,
+                                {
+                                    "relation_ja": rel,
+                                    "domain_concept_ja": domain_concept,
+                                    "range_concept_ja": range_concept,
+                                    "arg1": arg1,
+                                    "arg2": arg2,
+                                    "context_sentence": sentence,
+                                },
+                            )
+                            verdict = ontology_judge.judge_prompt(prompt_text)
+                            if verdict == 0:
+                                continue
+
+                            if prompt_id == "04":
+                                if verdict == 1:
+                                    domain_arg, range_arg = arg1, arg2
+                                elif verdict == 2:
+                                    domain_arg, range_arg = arg2, arg1
+                                else:
+                                    continue
+                            else:
+                                domain_arg, range_arg = arg1, arg2
+
+                            key = (sent_id, rel, domain_arg, range_arg, prompt_id)
+                            if key in seen_triples:
+                                continue
+                            seen_triples.add(key)
+                            triples.append({
+                                "id": sent_id,
+                                "sentence": sentence,
+                                "ontology_id": ontology_id,
+                                "relation_ja": rel,
+                                "pid": pid,
+                                "prompt_id": prompt_id,
+                                "prompt_name": prompt_name,
+                                "domain_arg": domain_arg,
+                                "range_arg": range_arg,
+                                "domain_concept_ja": domain_concept,
+                                "range_concept_ja": range_concept,
+                                "verdict": verdict,
+                                "ast_uid": ast_uid,
+                            })
+                    else:
+                        for arg in x_values:
+                            other_arg = pick_other_argument(x_values, arg)
+
+                            verdict_domain = 0
+                            verdict_range = 0
+
+                            if domain_concept:
+                                prompt_text = render_prompt(
+                                    prompt,
+                                    {
+                                        "relation_ja": rel,
+                                        "side": "domain",
+                                        "concept_ja": domain_concept,
+                                        "argument": arg,
+                                        "other_argument": other_arg,
+                                        "context_sentence": sentence,
+                                    },
+                                )
+                                verdict_domain = ontology_judge.judge_prompt(prompt_text)
+
+                            if range_concept:
+                                prompt_text = render_prompt(
+                                    prompt,
+                                    {
+                                        "relation_ja": rel,
+                                        "side": "range",
+                                        "concept_ja": range_concept,
+                                        "argument": arg,
+                                        "other_argument": other_arg,
+                                        "context_sentence": sentence,
+                                    },
+                                )
+                                verdict_range = ontology_judge.judge_prompt(prompt_text)
+
+                            if verdict_domain and not verdict_range:
+                                domain_arg, range_arg = arg, ""
+                                verdict = verdict_domain
+                            elif verdict_range and not verdict_domain:
+                                domain_arg, range_arg = "", arg
+                                verdict = verdict_range
+                            elif verdict_domain and verdict_range:
+                                if domain_concept == range_concept:
+                                    domain_arg, range_arg = arg, arg
+                                    verdict = max(verdict_domain, verdict_range)
+                                else:
+                                    continue
+                            else:
+                                continue
+
+                            key = (sent_id, rel, domain_arg, range_arg, prompt_id)
+                            if key in seen_triples:
+                                continue
+                            seen_triples.add(key)
+                            triples.append({
+                                "id": sent_id,
+                                "sentence": sentence,
+                                "ontology_id": ontology_id,
+                                "relation_ja": rel,
+                                "pid": pid,
+                                "prompt_id": prompt_id,
+                                "prompt_name": prompt_name,
+                                "domain_arg": domain_arg,
+                                "range_arg": range_arg,
+                                "domain_concept_ja": domain_concept,
+                                "range_concept_ja": range_concept,
+                                "verdict": verdict,
+                                "ast_uid": ast_uid,
+                            })
 
                 vis_rows.append({
                     "id": sent_id,
@@ -398,6 +565,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
             "id": sent_id,
             "recs": recs,
             "vis": vis_rows,
+            "triples": triples,
             "t_filter": t_filter,
             "t_match": t_match,
             "cand_asts": len(candidate_asts),
@@ -440,6 +608,12 @@ def main():
     print("依存解析 + CKY 準備開始")
     sent_df = pd.read_csv(INPUT_SENT_CSV, dtype=str)
     sentences = [s for s in sent_df["sent"].unique()]
+    ontology_col = None
+    for col in ONTOLOGY_ID_COL_CANDIDATES:
+        if col in sent_df.columns:
+            ontology_col = col
+            break
+    default_ontology_id = os.getenv("DEFAULT_ONTOLOGY_ID", "")
 
     # 依存解析キャッシュ
     try:
@@ -477,11 +651,20 @@ def main():
         s = r["sent"]
         if s in cky_json_data:
             info = cky_json_data[s]
+            ontology_id = ""
+            if ontology_col:
+                ontology_id = r.get(ontology_col)
+                if pd.isna(ontology_id):
+                    ontology_id = ""
+                ontology_id = str(ontology_id)
+            elif default_ontology_id:
+                ontology_id = default_ontology_id
             rows.append({
                 "id":   r["id"],
                 "sent": s,
                 "cky_table": info["dependency_table"],
                 "clauses":   info["clauses"],
+                "ontology_id": ontology_id,
             })
     total_gpu = len(rows)
     total_cpu = total_gpu
@@ -501,6 +684,26 @@ def main():
     if not os.path.exists(VIS_CSV):
         pd.DataFrame(columns=vis_cols).to_csv(
             VIS_CSV, index=False, encoding="utf-8-sig"
+        )
+
+    triple_cols = [
+        "id",
+        "sentence",
+        "ontology_id",
+        "relation_ja",
+        "pid",
+        "prompt_id",
+        "prompt_name",
+        "domain_arg",
+        "range_arg",
+        "domain_concept_ja",
+        "range_concept_ja",
+        "verdict",
+        "ast_uid",
+    ]
+    if not os.path.exists(TRIPLE_CSV):
+        pd.DataFrame(columns=triple_cols).to_csv(
+            TRIPLE_CSV, index=False, encoding="utf-8-sig"
         )
 
     # ログCSVのヘッダ
@@ -715,6 +918,11 @@ def main():
                     if vis_rows:
                         pd.DataFrame(vis_rows).to_csv(
                             VIS_CSV, mode="a", header=False, index=False, encoding="utf-8-sig"
+                        )
+                    triple_rows = out.get("triples", [])
+                    if triple_rows:
+                        pd.DataFrame(triple_rows).to_csv(
+                            TRIPLE_CSV, mode="a", header=False, index=False, encoding="utf-8-sig"
                         )
                 else:
                     with open(CPU_TIMING_CSV, "a", newline="", encoding="utf-8") as fcpu:
