@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PromptTemplateCollection",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "prompts": {
+      "type": "array",
+      "description": "プロンプト定義の配列",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "prompt_name",
+          "prompt_text",
+          "argument_elements"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "一意な識別子。コードから参照するキーになる"
+          },
+          "prompt_name": {
+            "type": "string",
+            "description": "人間向けのプロンプト名"
+          },
+          "description": {
+            "type": "string",
+            "description": "このプロンプトの用途や注意点の説明"
+          },
+          "prompt_text": {
+            "type": "string",
+            "description": "プロンプト本体のテキスト（{変数}埋め込み可）"
+          },
+          "argument_elements": {
+            "type": "array",
+            "description": "プロンプト内で使う変数一覧とその説明",
+            "items": {
+              "type": "object",
+              "required": ["name", "description"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "テンプレートで使う変数名"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "その変数が何を意味するか"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": ["prompts"]
+}

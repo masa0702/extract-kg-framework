@@ -1,0 +1,198 @@
+{
+  "prompts": [
+    {
+      "id": "01",
+      "prompt_name": "定義ベース判定",
+      "description": "entity が concept に当てはまるかを、「直接質問」ではなく **定義文の同等性/含意**で検証する。",
+      "prompt_text": "あなたは「定義に基づく型整合の2値判定器」です。\n入力は relation と、指定された side における argument と concept です。\nsubject/object や主語/目的語という概念は使わないでください。\n\n入力:\n- relation: {relation_ja}\n- side: {side} \n- concept: {concept_ja}\n- argument: {argument}\n- context_sentence: {context_sentence}\n\n手順:\n1) relation と side の文脈で解釈した {argument} の定義文を、日本語で1文だけ生成する（== argument_def）。\n2) {concept_ja} の定義文を、日本語で1文だけ生成する（== concept_def）。\n3) 判定は「argument_def が concept_def を含意するか（argument ⇒ concept）」で行う。\n   - 含意するなら verdict=1\n   - 含意しない、または判断不能なら verdict=0\n4) 出力は必ず次のJSON形式のみ。\n出力(JSONのみ):\n{\"verdict\": 0 or 1}\n"
+,
+      "argument_elements": [
+        {
+          "name": "argument",
+          "description": "argument"
+        },
+        {
+          "name": "concept_ja",
+          "description": "sideに対応する概念"
+        },
+        {
+          "name": "context_sentence",
+          "description": "任意"
+        },
+        {
+          "name": "relation_ja",
+          "description": "述語（日本語）"
+        },
+        {
+          "name": "side",
+          "description": "domain or range：外部で固定"
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "prompt_name": "アナロジー推論モジュール",
+      "description": "relation が 役割型のとき、(domain_concept → range_concept) を 既知の代表ペアに写像し、候補 triple が「同型の役割関係」かを検証する。",
+      "prompt_text": "あなたは「オントロジー関係のアナロジー方向判定器」です。\n入力は relation と、その relation に係る2つの項（arguments）です。\n重要: arg1/arg2 は domain/range のどちらに対応するか未確定です。subject/object や主語/目的語という概念は使わないでください。\n\n入力:\n- relation: {relation_ja}\n- relation_signature: {relation_ja}({domain_concept_ja}, {range_concept_ja})\n- arg1: {arg1}\n- arg2: {arg2}\n- context_sentence: {context_sentence}\n\n手順:\n1) relation が表す関係を短い日本語テンプレにする（例:「Xの監督はY」）。Xがdomain側、Yがrange側に対応するように書く。\n2) 上の関係と同型の代表例ペア（anchor）を2つ挙げる（anchor_domainはdomain概念の代表、anchor_rangeはrange概念の代表）。\n3) 次の2方向が「同型の関係」として自然に成立するかをそれぞれ判定する:\n   - case1: domain側=arg1, range側=arg2\n   - case2: domain側=arg2, range側=arg1\n4) ラベルは相互排他で決める:\n   - case1のみ成立: verdict=1\n   - case2のみ成立: verdict=2\n   - 両方成立、両方不成立、判断不能、arg2がNULL: label=0\n5) 出力は必ず次のJSON形式のみ。\n出力(JSONのみ):\n{\"verdict\": 0 or 1 or 2}\n"
+,
+      "argument_elements": [
+        {
+          "name": "arg1",
+          "description": ""
+        },
+        {
+          "name": "arg2",
+          "description": "（1項しかない場合は空文字ではなく \"NULL\" を渡すことを推奨）"
+        },
+        {
+          "name": "context_sentence",
+          "description": "元文（可能なら。空でも可）"
+        },
+        {
+          "name": "domain_concept_ja",
+          "description": "ドメイン概念（日本語ラベル）"
+        },
+        {
+          "name": "relation_ja",
+          "description": "述語（日本語）"
+        },
+        {
+          "name": "range_concept_ja",
+          "description": "レンジ概念（日本語ラベル）"
+        }
+      ]
+    },
+    {
+      "id": "10",
+      "prompt_name": "同義語生成による整合チェック",
+      "description": "日本語訳のゆらぎ・表記差を吸収するために、entity または relation の 同義語候補集合を作り、置換しても成立するかで0/1判定する。",
+      "prompt_text": "あなたは「同義語生成による整合性回復の2値ゲート」です。\n入力は relation と relation_signature、および2つの項（arguments）です。\n重要: subject/object や主語/目的語という概念は使わないでください。\n\n目的:\n- 表現揺れ（同義語・別表記・言い換え）が主要因で整合性が崩れている可能性が高い場合のみ verdict=1 とし、\n  同義語候補を生成する。\n- 表現揺れでは解決しない場合は verdict=0 とする（同義語候補は空でもよい）。\n\n入力:\n- relation: {relation_ja}\n- relation_signature: {relation_ja}({domain_concept_ja}, {range_concept_ja})\n- arg1: {arg1}\n- arg2: {arg2}\n- context_sentence: {context_sentence}\n\n判断規則:\n1) verdict=1 にしてよいのは、次のいずれかが強い場合のみ:\n   a) relation の訳語揺れ・同義語がありうる\n   b) domain_concept / range_concept の抽象語に同義語がありうる\n   c) arg1/arg2 が略称・外来語・カタカナ表記・表記揺れを含み、別表記がありうる\n2) 役割構造や階層関係の誤りが主因で、同義語では救えない場合は verdict=0。\n3) verdict=1 の場合のみ、対象（targets）を選び、各対象の同義語/別表記を最大3件ずつ生成する（短い語/短句のみ）。\n4) 生成結果を使って、関係の種類が伝わる「正規化した関係テンプレ」normalized_relation を1つ作る（例:「Xの監督はY」）。\n   domain/range の割当は確定しなくてよい。\n5) 出力は必ず次のJSON形式のみ。\n出力(JSONのみ):\n{\"verdict\": 0 or 1}\n"
+,
+      "argument_elements": [
+        {
+          "name": "arg1",
+          "description": ""
+        },
+        {
+          "name": "arg2",
+          "description": "（無い場合は \"NULL\"）"
+        },
+        {
+          "name": "context_sentence",
+          "description": "元文（任意だが推奨）"
+        },
+        {
+          "name": "domain_concept_ja",
+          "description": ""
+        },
+        {
+          "name": "relation_ja",
+          "description": ""
+        },
+        {
+          "name": "range_concept_ja",
+          "description": ""
+        }
+      ]
+    },
+    {
+      "id": "15",
+      "prompt_name": "フレーム役割チェック",
+      "description": "relation を「事象フレーム」と見なし、主語/目的語がそのフレームの **必須役割（argument）**を満たすかを判定する。",
+      "prompt_text": "あなたは「フレーム役割（ロール）整合の2値判定器」です。\n入力は relation と、指定された side における argument と concept です。\n重要: subject/object や主語/目的語という概念は使わないでください。\nこのモジュールは方向を推定せず、side固定で判定します。\n\n入力:\n- relation: {relation_ja}\n- side: {side} \n- concept: {concept_ja}\n- argument: {argument}\n- other_argument: {other_argument}   # 無ければ \"NULL\"\n- context_sentence: {context_sentence}\n\n手順:\n1) relation が喚起するフレーム（イベント/状況）を短く命名する（frame）。\n2) side={side} に対応する必須役割名（role_name）を短く1つ定義する（例:「作品」「人物」「組織」「参加者」など）。\n3) argument と other_argument（NULLなら省略）を含む短い関係文Aを1文で作る。\n4) Aの意味を保ったまま、argument が concept={concept_ja} に属する役割フィラーとして自然に成立することが読み取れる言い換えA'を1文で作る。\n5) 判定は A が A' を含意するか（A ⇒ A'）で行う。\n   - 含意するなら verdict=1\n   - 含意しない、または判断不能なら verdict=0\n6) 出力は必ず次のJSON形式のみ。\n出力(JSONのみ):\n{\"verdict\": 0 or 1}\n"
+,
+      "argument_elements": [
+        {
+          "name": "argument",
+          "description": ""
+        },
+        {
+          "name": "concept_ja",
+          "description": "sideに対応する概念"
+        },
+        {
+          "name": "context_sentence",
+          "description": "任意だが推奨"
+        },
+        {
+          "name": "other_argument",
+          "description": "無ければ \"NULL\""
+        },
+        {
+          "name": "relation_ja",
+          "description": ""
+        },
+        {
+          "name": "side",
+          "description": "domain or range：外部で固定"
+        }
+      ]
+    },
+    {
+      "id": "17",
+      "prompt_name": "階層分類チェック（タクソノミーの整合）",
+      "description": "entity → 上位概念 の上位下位関係（is-a）を仮想的にたどらせ、domain/range concept に 上位包含されるかで判定する。",
+      "prompt_text": "あなたは「タクソノミー（is-a階層）整合の2値判定器」です。\n入力は relation と、指定された side における argument と concept です。\n重要: subject/object や主語/目的語という概念は使わないでください。\nこのモジュールは方向を推定せず、side固定で判定します。\n\n入力:\n- relation: {relation_ja}\n- side: {side}\n- concept: {concept_ja}\n- argument: {argument}\n- context_sentence: {context_sentence}\n\n手順:\n1) context_sentence がある場合は文脈に沿って、argument の上位概念（ハイパーニム）を最大3段まで列挙する。\n   形式: [\"argument\",\"hyper1\",\"hyper2\",\"hyper3\"]（名詞の短語のみ）。\n2) concept={concept_ja}（または明確な同義）が、この上位概念列に含まれるかを判定する。\n   - 含まれる/明確に含意されるなら verdict=1\n   - 含まれないなら verdict=0\n   - 判断不能なら verdict=0\n3) 出力は必ず次のJSON形式のみ。\n出力(JSONのみ):\n{\"verdict\": 0 or 1}\n"
+,
+      "argument_elements": [
+        {
+          "name": "argument",
+          "description": ""
+        },
+        {
+          "name": "concept_ja",
+          "description": "sideに対応する概念"
+        },
+        {
+          "name": "context_sentence",
+          "description": "任意だが推奨：固有名の種別推定に効く"
+        },
+        {
+          "name": "relation_ja",
+          "description": ""
+        },
+        {
+          "name": "side",
+          "description": "domain or range：外部で固定"
+        }
+      ]
+    },
+    {
+      "id": "21",
+      "prompt_name": "同義語・言い換えベース判定モジュール",
+      "description": "（llm-jpで）制約付きで A→A'（言い換え）を生成し、 （BERTで）BERT(A,A')→{same/not} の 二値判定器へ置換可能な形に落とす。",
+      "prompt_text": "あなたは「同義語・言い換えに基づくオントロジー整合の2値判定器」です。\n入力は relation と、指定された side における argument と concept です。\n重要: subject/object や主語/目的語という概念は使わないでください。\nこのモジュールは方向を推定せず、side固定で判定します。\n\n入力:\n- relation: {relation_ja}\n- side: {side}\n- concept: {concept_ja}\n- argument: {argument}\n- other_argument: {other_argument}   # 無ければ \"NULL\"\n- context_sentence: {context_sentence}\n\n制約:\n- A と A' はそれぞれ日本語1文のみ（長文禁止）。\n- A' には concept={concept_ja} をそのまま含める（概念制約を明示する）。\n- 判断不能は必ず verdict=0。\n\n手順:\n1) relation を用いて、argument と other_argument（NULLなら省略）を含む短い関係文 A を1文で作る。\n   必要なら同義語・言い換えを使ってよいが、意味は変えない。\n2) A の意味を保ったまま、side={side} の argument が concept={concept_ja} に属することが自然に読み取れる\n   「概念制約付き言い換え」A' を1文で作る。A' には concept={concept_ja} を必ず含める。\n3) 判定は A が A' を含意するか（A ⇒ A'）で行う。\n   - 含意するなら verdict=1\n   - 含意しない、または判断不能なら verdict=0\n4) 出力は必ず次のJSON形式のみ。\n\n出力(JSONのみ):\n{\"verdict\": 0 or 1}\n"
+,
+      "argument_elements": [
+        {
+          "name": "A_prime",
+          "description": ""
+        },
+        {
+          "name": "argument",
+          "description": ""
+        },
+        {
+          "name": "concept_ja",
+          "description": "side に対応する concept 名（日本語）"
+        },
+        {
+          "name": "context_sentence",
+          "description": "元文（任意だが推奨）"
+        },
+        {
+          "name": "other_argument",
+          "description": "もう片方の項（存在する場合のみ。無ければ \"NULL\"）"
+        },
+        {
+          "name": "relation_ja",
+          "description": "述語（日本語）"
+        },
+        {
+          "name": "side",
+          "description": "domain または range（外部から固定で渡す。プロンプト内で判断しない）"
+        }
+      ]
+    }
+  ]
+}
