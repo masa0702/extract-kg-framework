@@ -5,7 +5,7 @@
 
 ## 1. 全体像（ざっくり）
 1. パターンAST(JSON)の読み込み → コンパイル → 高速利用
-2. 入力CSVの読み込み
+2. 入力JSONLの読み込み
 3. 依存解析キャッシュの更新
 4. CKY表生成/読込（最適化キャッシュ）
 5. 文ごとのCPU/GPU並列処理（GPU: CKY解析、CPU: フィルタ→マッチング→抽出）
@@ -21,9 +21,9 @@
   - `data/patterns/patterns_ast.json`（仕様名。実体は JSON / JSONL を想定）
   - 形式: list[dict] もしくは JSONL、各要素に `pattern_id`, `pattern`, `ast` などを含む
   - 受け取ったASTは「コンパイル済み表現」に変換し、以降は高速に参照できる形式で利用する
-- 入力文 CSV
-  - `data/T2KGB_JA/target_data/*.csv`
-  - 必須列: `id`, `sent`
+- 入力文 JSONL
+  - `data/T2KGB_JA/target_data/*.jsonl`
+  - 必須列: `id`, `sent_ja`, `final_triples`
   - 任意列: `ontology_id` / `ontology` / `ontology_category` / `category`
 - 依存解析キャッシュ（最適化版）
   - 仕様上は「増分更新」「圧縮」「部分読込」を前提とした形式に移行
@@ -73,12 +73,12 @@
 
 ---
 
-### 3.2 入力文CSVの読み込み
+### 3.2 入力文JSONLの読み込み
 **入力**
-- `data/T2KGB_JA/target_data/*.csv`
+- `data/T2KGB_JA/target_data/*.jsonl`
 
 **処理**
-- `sent` 列をユニーク化して対象文一覧を作成
+- `sent_ja`（無い場合は `sent`）をユニーク化して対象文一覧を作成
 - `ontology_id` 列が存在すれば文ごとに保持（なければ空文字）
 - 環境変数 `DEFAULT_ONTOLOGY_ID` を補完として使用可能
 
@@ -87,7 +87,7 @@
 - 文ごとのメタ情報 `rows` の作成準備
 
 **利用コード/モデル**
-- `src/main.py`（`pandas`でCSV読込）
+- `src/main.py`（JSONL読込）
 
 ---
 
@@ -266,7 +266,7 @@
 ---
 
 ## 5. 注意点（仕様反映後）
-- 入力CSVは `data/T2KGB_JA/target_data/` 配下に配置する
+- 入力JSONLは `data/T2KGB_JA/target_data/` 配下に配置する
 - GPU/CPUプロセスはタイムアウト時に強制終了される
 - LLM検証（並列判定/オントロジー判定）は vLLM(OpenAI互換) の `chat_json` を利用
 - candidate / verified は**同一列名**の出力として分離される
