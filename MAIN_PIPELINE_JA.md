@@ -4,31 +4,30 @@
 各処理の入出力を示し、全体フローと合わせて説明します。
 
 ## 1. 全体像（ざっくり）
-1. パターンAST(JSON)の読み込み → コンパイル → 高速利用
+1. パターン定義の読み込み → AST化 → コンパイル → 高速利用
 2. 入力JSONLの読み込み
 3. 依存解析キャッシュの更新
 4. CKY表生成/読込（最適化キャッシュ）
 5. 文ごとのCPU/GPU並列処理（GPU: CKY解析、CPU: フィルタ→マッチング→抽出）
 6. 追加のオントロジー整合検証（relation + prompt 対応表）
-7. 逐次CSV出力（抽出結果・可視化ログ・検証済みTriple）
+7. 逐次CSV出力（candidate/verified・可視化ログ）
 
 ---
 
-## 2. 主要な入出力（仕様反映）
+## 2. 主要な入出力（現状実装）
 
 ### 2.1 入力
-- パターンAST（JSON）
-  - `data/patterns/patterns_ast.json`（仕様名。実体は JSON / JSONL を想定）
-  - 形式: list[dict] もしくは JSONL、各要素に `pattern_id`, `pattern`, `ast` などを含む
-  - 受け取ったASTは「コンパイル済み表現」に変換し、以降は高速に参照できる形式で利用する
+- パターン定義
+  - `data/patterns/patterns.index.json`（対象パターンの `pattern_id` を列挙）
+  - `data/patterns/patterns.jsonl`（`pattern_id` と `pattern` を持つJSONL）
 - 入力文 JSONL
   - `data/T2KGB_JA/target_data/*.jsonl`
-  - 必須列: `id`, `sent_ja`, `final_triples`
+  - 必須列: `id`, `sent_ja`（無い場合は `sent` を利用）
   - 任意列: `ontology_id` / `ontology` / `ontology_category` / `category`
-- 依存解析キャッシュ（最適化版）
-  - 仕様上は「増分更新」「圧縮」「部分読込」を前提とした形式に移行
-- CKY表キャッシュ（最適化版）
-  - 仕様上は「文ごとの分割保存」「必要最小限フィールドの保持」「圧縮」を前提
+- 依存解析キャッシュ（文単位gzip）
+  - `../results/.../<prefix>/cache/dep/*.json.gz`
+- CKY表キャッシュ（文単位gzip）
+  - `../results/.../<prefix>/cache/cky/*.json.gz`
 - プロンプト管理
   - `prompts/prompts.json`
   - `prompts/relation_prompt_map.json`
@@ -51,17 +50,18 @@
 
 ## 3. ステップ別の詳細（入出力つき）
 
-### 3.1 パターンASTのロード（JSON→コンパイル）
+### 3.1 パターン定義のロードとコンパイル
 **入力**
-- `data/patterns/patterns_ast.json`（仕様名。JSON / JSONL どちらでも可）
+- `data/patterns/patterns.index.json`
+- `data/patterns/patterns.jsonl`
 
 **処理**
-- ASTをJSONから読み込み、パターンごとに以下のメタ情報を付与:
+- `patterns.index.json` から対象 `pattern_id` を確定
+- `patterns.jsonl` から該当パターンを読み込み、`PatternParser` でAST化
+- パターンごとに以下のメタ情報を付与:
   - `literal_list`: ASTから抽出したリテラル
   - `parallel_var_count`: 並列変数数
   - `ast_uid`: ASTのハッシュID
-- ASTを「コンパイル済み表現」に変換し、繰り返し利用に耐える形へ変換
-  （例: ノード参照の正規化、頻出リテラル索引の事前構築など）
 - `var_count` ごとに `ast_dict` を構築
 
 **出力**
@@ -69,7 +69,9 @@
 
 **利用コード/モデル**
 - `src/main.py`
-- `src/pattern/pattern_nodes.py`（`extract_literal_strings`, `count_parallel_variables`）
+- `src/modules_core/pattern_compiler.py`
+- `src/pattern/pattern_parser.py`
+- `src/pattern/pattern_nodes.py`
 
 ---
 
@@ -79,8 +81,8 @@
 
 **処理**
 - `sent_ja`（無い場合は `sent`）をユニーク化して対象文一覧を作成
-- `ontology_id` 列が存在すれば文ごとに保持（なければ空文字）
-- 環境変数 `DEFAULT_ONTOLOGY_ID` を補完として使用可能
+- `ontology_id` 系列が無ければ `DEFAULT_ONTOLOGY_ID` を使用
+- さらに `ont_*.jsonl` のファイル名から `ontology_id` を補完
 
 **出力**
 - 文一覧 `sentences`
@@ -91,7 +93,7 @@
 
 ---
 
-### 3.3 依存解析キャッシュ更新（最適化仕様）
+### 3.3 依存解析キャッシュ更新（文単位gzip）
 **入力**
 - 最適化済み依存キャッシュ
 - 新規文リスト
@@ -105,12 +107,13 @@
 
 **利用コード/モデル**
 - `src/main.py`
+- `src/modules_core/cache_store.py`
 - `src/modules_core/bunsetu.py`（`DependencyAnalysis`）
   モデル: spaCy GiNZA `ja_ginza_bert_large`（失敗時 `ja_ginza` へフォールバック）
 
 ---
 
-### 3.4 CKY表の生成/読込（最適化仕様）
+### 3.4 CKY表の生成/読込（文単位gzip）
 **入力**
 - 最適化済み依存キャッシュ
 
@@ -123,6 +126,7 @@
 
 **利用コード/モデル**
 - `src/main.py`
+- `src/modules_core/cache_store.py`
 - `src/modules_core/cky_table.py`（`CkyTable`）
 
 ---
@@ -182,7 +186,7 @@
    - AST UID, リテラル, 変数マッピングを `ast_visualization.csv` に追記
 
 **出力**
-- `recs`（抽出ペア）
+- `candidates`（候補出力）
 - `vis_rows`（可視化ログ）
 
 **利用コード/モデル**
@@ -240,32 +244,19 @@
 
 **出力**
 - candidate / verified（同一スキーマで別出力）
+  - `../results/.../<prefix>_triples_candidate.csv`
+  - `../results/.../<prefix>_triples_verified.csv`
 - `ast_visualization.csv`
 
 ---
 
-## 4. パターン入力仕様（確定事項）
-
-### 4.1 仕様方針
-今後のマッチングは **`data/patterns/patterns.index.json` を唯一のパターンカタログ** として扱う。
-`src/main.py` は **pattern.index.json を参照してマッチング対象パターンを決定する** 仕様に固定する。
-パターンASTは **JSON入力→コンパイル済み表現** を標準とし、実行時はコンパイル済み表現を優先利用する。
-
-### 4.2 パターン解決のルール（仕様）
+## 4. パターン入力構成（現状実装）
 - `patterns.index.json` の `patterns[*].pattern_id` を基準として処理対象を確定
-- pattern本体は `data/patterns/patterns.jsonl` から `pattern_id` で取得する
-- ASTは **JSONとして入力**し、読み込み時にコンパイルして高速利用する
-  - 例: `data/patterns/patterns_ast.json`（pattern_id とASTを持つJSON/JSONL）
-  - `ast_sig` による紐付け・キャッシュの保持は許容（ただし入力はJSONを起点とする）
-
-### 4.3 旧方式の扱い
-- 現状 `patterns_ast.pkl.gz` を直接ロードしているが、
-  **今後は `patterns.index.json` を起点とし、ASTはJSON入力→コンパイルで供給する**。
-- 実装変更は後続タスクで行う。
+- `patterns.jsonl` から該当 `pattern_id` の `pattern` を取得し、実行時にAST化・コンパイル
 
 ---
 
-## 5. 注意点（仕様反映後）
+## 5. 注意点（現状実装）
 - 入力JSONLは `data/T2KGB_JA/target_data/` 配下に配置する
 - GPU/CPUプロセスはタイムアウト時に強制終了される
 - LLM検証（並列判定/オントロジー判定）は vLLM(OpenAI互換) の `chat_json` を利用
