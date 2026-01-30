@@ -296,7 +296,10 @@ class BunsetsuSegmenter:
     @staticmethod
     def segment(sentence: str) -> List[List[Any]]:
         doc = nlp(sentence)
+        return BunsetsuSegmenter._segment_doc(doc)
 
+    @staticmethod
+    def _segment_doc(doc) -> List[List[Any]]:
         spans = list(ginza.bunsetu_spans(doc))             # ① GiNZA
         spans = _merge_connectives(spans)                  # ② 接続語吸収
         spans = _merge_brackets_and_particle(spans)        # ③ 括弧マージ
@@ -304,7 +307,6 @@ class BunsetsuSegmenter:
         spans = _merge_consecutive_english_spans(spans)    # ★⑤ 英語連結  ← NEW
         spans = _merge_alnum_katakana_spans(spans)         # ⑥ 英数字+カナ結合
         spans = _merge_trailing_comma(spans)               # ⑦ 読点吸収
-
 
         # 6. 文節内の接続語で再分割
         refined = []
@@ -340,7 +342,7 @@ class BunsetsuSegmenter:
         """
         docs = nlp.pipe(sentences)
         return {
-            sent: cls.segment(sent)  # type: ignore[arg-type]
+            sent: cls._segment_doc(doc)  # type: ignore[arg-type]
             for sent, doc in zip(sentences, docs)
         }
 
@@ -373,7 +375,7 @@ class DependencyAnalysis:
                 for tok in doc
             ]
 
-            raw_clause_data = segmenter.segment(sentence)
+            raw_clause_data = segmenter._segment_doc(doc)
 
             clause_data = []
             for (

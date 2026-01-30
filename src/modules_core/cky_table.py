@@ -93,6 +93,15 @@ class CkyTable:
             print(f"CKY表を {output_json_file} に保存しました。")
 
     @staticmethod
+    def build_entry_from_clauses(clauses_list: Sequence[Sequence[Any]]) -> Dict[str, Any]:
+        """Create a minimal CKY entry dict from clause list."""
+        cky_table = CkyTable.create_initializing_cky_table(clauses_list)
+        return {
+            "clauses": list(clauses_list),
+            "dependency_table": cky_table,
+        }
+
+    @staticmethod
     def display_multiline_cky_table(cky_table: list, width: int = 60) -> str:
         """Return a formatted multiline table string (no implicit print)."""
         table_lines: list[list[list[str]]] = []

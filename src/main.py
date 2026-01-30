@@ -20,16 +20,15 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 
 import json
-import gzip
-import pickle
 import time
 import csv
 import hashlib
+import pickle
 import pandas as pd
-from collections import defaultdict
 from itertools import product, combinations
 from tqdm.auto import tqdm
 from bisect import bisect_left, bisect_right
+from glob import glob
 
 import multiprocessing as mp
 from multiprocessing.connection import Connection
@@ -39,16 +38,15 @@ import torch
 from pattern.pattern_nodes import (
     ParallelNode,
     VariableNode,
-    extract_literal_strings,
-    count_parallel_variables,
 )
 from modules_core.matcher import CKYMatcher
 from modules_core.cky_table import CkyTable
 from modules_bert.bert_modules import CKYAnalyzer
 from modules_core.bunsetu import DependencyAnalysis
-from modules_core.utils import MyUtility
 from llm.parallel_judge import ParallelJudgeLLMJP
 from config.filter_settings import PARALLEL_KEYS
+from modules_core.pattern_compiler import load_and_compile_patterns, build_ast_dict
+from modules_core.cache_store import SentenceCacheStore
 from modules_core.ontology_verify import (
     get_ontology_resolver,
     get_ontology_judge,
@@ -57,19 +55,11 @@ from modules_core.ontology_verify import (
     pick_other_argument,
 )
 
-AST_PICKLE      = "../data/patterns/swopatterns_ast.pkl.gz"
-INPUT_SENT_CSV  = "../data/target_datas/swo_target_data.csv"
+PATTERN_INDEX_JSON = "../data/patterns/patterns.index.json"
+PATTERN_JSONL = "../data/patterns/patterns.jsonl"
+INPUT_JSONL_DIR = "../data/T2KGB_JA/target_data"
 
-dir_name   = os.path.basename(os.path.dirname(INPUT_SENT_CSV))
-filename   = os.path.basename(INPUT_SENT_CSV)
-prefix     = filename[:-4]
-output_dir = f"../results/extract_pred_arg_pair/{dir_name}/{prefix}/"
-
-dep_json_path  = f"{output_dir}{prefix}_dependency_analysis.json"
-cky_json_path  = f"{output_dir}{prefix}_dependency_analysis_with_cky.json"
-RESULT_CSV     = f"{output_dir}{prefix}_extract_po_pair.csv"
-VIS_CSV        = f"{output_dir}{prefix}_ast_visualization.csv"
-TRIPLE_CSV     = f"{output_dir}{prefix}_validated_triples.csv"
+RESULTS_ROOT = "../results/extract_pred_arg_pair"
 
 PROMPTS_JSON = "../prompts/prompts.json"
 RELATION_PROMPT_MAP_JSON = "../prompts/relation_prompt_map.json"
@@ -81,14 +71,6 @@ ONTOLOGY_ID_COL_CANDIDATES = [
     "ontology_category",
     "category",
 ]
-
-LOG_DIR = os.path.join(output_dir, "logs")
-SENT_STATS_CSV = os.path.join(LOG_DIR, f"{prefix}_sentence_stats.csv")
-GPU_TIMING_CSV = os.path.join(LOG_DIR, f"{prefix}_gpu_timing.csv")
-GPU_DONE_CSV   = os.path.join(LOG_DIR, f"{prefix}_gpu_done.csv")
-GPU_TIMEOUT_CSV= os.path.join(LOG_DIR, f"{prefix}_gpu_timeout.csv")
-CPU_TIMING_CSV = os.path.join(LOG_DIR, f"{prefix}_cpu_timing.csv")
-INFLIGHT_CSV   = os.path.join(LOG_DIR, f"{prefix}_inflight.csv")
 
 EXCLUDE_POS = ["助詞", "接続詞", "助動詞",
                "補助記号-句点", "補助記号-読点",
@@ -191,6 +173,22 @@ def get_ast_uid(ast) -> str:
     except Exception:
         b = repr(ast).encode("utf-8", errors="ignore")
     return hashlib.md5(b).hexdigest()[:16]
+
+def iter_jsonl(path: str):
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            yield json.loads(line)
+
+def derive_ontology_id_from_filename(path: str) -> str:
+    base = os.path.basename(path)
+    if base.startswith("ont_"):
+        parts = base.split("_")
+        if len(parts) >= 3:
+            return "_".join(parts[:3])
+    return ""
 
 def gpu_child_worker(row_payload, device_id: int, conn: Connection):
     try:
@@ -356,9 +354,9 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
 
         t1 = time.time()
         seen = set()
-        recs = []
+        candidates = []
         vis_rows = []
-        triples = []
+        verified = []
         seen_triples = set()
 
         for entry in filtered:
@@ -391,13 +389,22 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                     continue
 
                 ast_uid  = entry.get("ast_uid", get_ast_uid(ast))
-                for idx, ((xk, xv), (yk, yv)) in enumerate(product(Xs, Ys)):
-                    recs.append({
-                        "id":           sent_id,
-                        "sentence":     sentence,
-                        "triple_index": idx,
-                        "rel_ja":       yv,
-                        "arg_ja":       xv
+                for _, ((xk, xv), (yk, yv)) in enumerate(product(Xs, Ys)):
+                    candidates.append({
+                        "id": sent_id,
+                        "sentence": sentence,
+                        "ontology_id": ontology_id,
+                        "relation_ja": yv,
+                        "pid": "",
+                        "prompt_id": "",
+                        "prompt_name": "",
+                        "domain_arg": xv,
+                        "range_arg": "",
+                        "domain_concept_ja": "",
+                        "range_concept_ja": "",
+                        "verdict": "",
+                        "ast_uid": ast_uid,
+                        "stage": "candidate",
                     })
 
                 var_cnt  = entry.get("var_count", 0)
@@ -459,7 +466,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                             if key in seen_triples:
                                 continue
                             seen_triples.add(key)
-                            triples.append({
+                            verified.append({
                                 "id": sent_id,
                                 "sentence": sentence,
                                 "ontology_id": ontology_id,
@@ -473,6 +480,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                 "range_concept_ja": range_concept,
                                 "verdict": verdict,
                                 "ast_uid": ast_uid,
+                                "stage": "verified",
                             })
                     else:
                         for arg in x_values:
@@ -528,7 +536,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                             if key in seen_triples:
                                 continue
                             seen_triples.add(key)
-                            triples.append({
+                            verified.append({
                                 "id": sent_id,
                                 "sentence": sentence,
                                 "ontology_id": ontology_id,
@@ -542,6 +550,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                 "range_concept_ja": range_concept,
                                 "verdict": verdict,
                                 "ast_uid": ast_uid,
+                                "stage": "verified",
                             })
 
                 vis_rows.append({
@@ -563,9 +572,9 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
 
         out = {
             "id": sent_id,
-            "recs": recs,
+            "candidates": candidates,
             "vis": vis_rows,
-            "triples": triples,
+            "verified": verified,
             "t_filter": t_filter,
             "t_match": t_match,
             "cand_asts": len(candidate_asts),
@@ -586,105 +595,92 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
 # =============================================================
 # main
 # =============================================================
-def main():
-    print("AST Pickle をロード中…")
-    with gzip.open(AST_PICKLE, "rb") as fp:
-        patterns_ast = pickle.load(fp)
+def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
+    dir_name = os.path.basename(os.path.dirname(input_jsonl_path))
+    filename = os.path.basename(input_jsonl_path)
+    prefix = filename[:-6] if filename.endswith(".jsonl") else os.path.splitext(filename)[0]
+    output_dir = os.path.join(RESULTS_ROOT, dir_name, prefix)
+    log_dir = os.path.join(output_dir, "logs")
+    cache_dir = os.path.join(output_dir, "cache")
 
-    # ASTメタ付与（★ ast_uid 追加）
-    ast_dict = defaultdict(list)
-    for entry in patterns_ast:
-        ast = entry["ast"]
-        entry["literal_list"] = extract_literal_strings(ast)
-        entry["parallel_var_count"] = count_parallel_variables(ast)
-        entry["ast_uid"] = get_ast_uid(ast)  # ★追加
-        ast_dict[entry["var_count"]].append(entry)
-    print("ロード完了: {} パターン".format(len(patterns_ast)))
-
-    # 出力ディレクトリ
     os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(LOG_DIR, exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)
 
-    print("依存解析 + CKY 準備開始")
-    sent_df = pd.read_csv(INPUT_SENT_CSV, dtype=str)
-    sentences = [s for s in sent_df["sent"].unique()]
-    ontology_col = None
-    for col in ONTOLOGY_ID_COL_CANDIDATES:
-        if col in sent_df.columns:
-            ontology_col = col
-            break
+    print(f"入力JSONL: {input_jsonl_path}")
+
+    records = list(iter_jsonl(input_jsonl_path))
+    if not records:
+        print("JSONLが空です。スキップします。")
+        return
+
+    sentences = []
+    seen_sentences = set()
+    for r in records:
+        s = r.get("sent_ja") or r.get("sent") or ""
+        if s and s not in seen_sentences:
+            seen_sentences.add(s)
+            sentences.append(s)
+
     default_ontology_id = os.getenv("DEFAULT_ONTOLOGY_ID", "")
+    file_ontology_id = derive_ontology_id_from_filename(input_jsonl_path)
 
-    # 依存解析キャッシュ
-    try:
-        with open(dep_json_path, "r", encoding="utf-8") as f:
-            dep_data = json.load(f)
-        if not isinstance(dep_data, dict):
-            dep_data = {}
-    except (FileNotFoundError, json.JSONDecodeError):
-        dep_data = {}
+    dep_cache = SentenceCacheStore(os.path.join(cache_dir, "dep"), "dep")
+    cky_cache = SentenceCacheStore(os.path.join(cache_dir, "cky"), "cky")
 
+    dep_data = dep_cache.load_many(sentences)
     new_sentences = [s for s in sentences if s not in dep_data]
 
-    depana  = DependencyAnalysis()
-    myutil  = MyUtility()
+    depana = DependencyAnalysis()
     cky_obj = CkyTable()
 
     if new_sentences:
         print("GiNZA 解析: {} 文".format(len(new_sentences)))
         dep_results = depana.analyze_sentences(new_sentences)
+        for sent, data in dep_results.items():
+            dep_cache.save(sent, data)
         dep_data.update(dep_results)
-        myutil.save_json_from_file(dep_data, dep_json_path)
 
-    if not os.path.exists(cky_json_path):
-        print("CKY 表を生成中 …")
-        cky_obj.process_json_to_cky_and_save(dep_json_path, cky_json_path)
+    cky_data = cky_cache.load_many(sentences)
+    new_cky = [s for s in sentences if s not in cky_data]
+    for s in new_cky:
+        dep_entry = dep_data.get(s)
+        if not dep_entry:
+            continue
+        cky_entry = cky_obj.build_entry_from_clauses(dep_entry.get("clauses", []))
+        cky_cache.save(s, cky_entry)
+        cky_data[s] = cky_entry
 
-    with open(cky_json_path, "r", encoding="utf-8") as f:
-        cky_json_data = json.load(f)
-
-    print("依存解析 + CKY 準備完了")
-
-    # 対象行（cky情報がある文のみ）
     rows = []
-    for _, r in sent_df.iterrows():
-        s = r["sent"]
-        if s in cky_json_data:
-            info = cky_json_data[s]
-            ontology_id = ""
-            if ontology_col:
-                ontology_id = r.get(ontology_col)
-                if pd.isna(ontology_id):
-                    ontology_id = ""
-                ontology_id = str(ontology_id)
-            elif default_ontology_id:
-                ontology_id = default_ontology_id
-            rows.append({
-                "id":   r["id"],
-                "sent": s,
-                "cky_table": info["dependency_table"],
-                "clauses":   info["clauses"],
-                "ontology_id": ontology_id,
-            })
+    for r in records:
+        s = r.get("sent_ja") or r.get("sent") or ""
+        if not s or s not in cky_data:
+            continue
+        info = cky_data[s]
+        ontology_id = ""
+        for col in ONTOLOGY_ID_COL_CANDIDATES:
+            val = r.get(col)
+            if val is not None and str(val).strip() != "":
+                ontology_id = str(val)
+                break
+        if not ontology_id:
+            ontology_id = default_ontology_id or file_ontology_id
+        rows.append({
+            "id": r.get("id", ""),
+            "sent": s,
+            "cky_table": info.get("dependency_table", []),
+            "clauses": info.get("clauses", []),
+            "ontology_id": ontology_id,
+        })
+
     total_gpu = len(rows)
     total_cpu = total_gpu
+    if total_gpu == 0:
+        print("CKY情報のある文がありません。スキップします。")
+        return
 
-    # 結果CSV（既存）
-    header_cols = ["id", "sentence", "triple_index", "rel_ja", "arg_ja"]
-    if not os.path.exists(RESULT_CSV):
-        pd.DataFrame(columns=header_cols).to_csv(
-            RESULT_CSV, index=False, encoding="utf-8-sig"
-        )
-
-    # ★ 可視化CSV（新規）
-    vis_cols = [
-        "id","sentence","ast_uid","var_count","parallel_var_count","literals",
-        "X_vars","Y_vars","varmap_raw","varmap_clean","parallel_var_names","parallel_elements"
-    ]
-    if not os.path.exists(VIS_CSV):
-        pd.DataFrame(columns=vis_cols).to_csv(
-            VIS_CSV, index=False, encoding="utf-8-sig"
-        )
+    candidate_csv = os.path.join(output_dir, f"{prefix}_triples_candidate.csv")
+    verified_csv = os.path.join(output_dir, f"{prefix}_triples_verified.csv")
+    vis_csv = os.path.join(output_dir, f"{prefix}_ast_visualization.csv")
 
     triple_cols = [
         "id",
@@ -700,34 +696,53 @@ def main():
         "range_concept_ja",
         "verdict",
         "ast_uid",
+        "stage",
     ]
-    if not os.path.exists(TRIPLE_CSV):
+    if not os.path.exists(candidate_csv):
         pd.DataFrame(columns=triple_cols).to_csv(
-            TRIPLE_CSV, index=False, encoding="utf-8-sig"
+            candidate_csv, index=False, encoding="utf-8-sig"
+        )
+    if not os.path.exists(verified_csv):
+        pd.DataFrame(columns=triple_cols).to_csv(
+            verified_csv, index=False, encoding="utf-8-sig"
         )
 
-    # ログCSVのヘッダ
-    if not os.path.exists(SENT_STATS_CSV):
-        with open(SENT_STATS_CSV, "w", newline="", encoding="utf-8") as f:
+    vis_cols = [
+        "id","sentence","ast_uid","var_count","parallel_var_count","literals",
+        "X_vars","Y_vars","varmap_raw","varmap_clean","parallel_var_names","parallel_elements"
+    ]
+    if not os.path.exists(vis_csv):
+        pd.DataFrame(columns=vis_cols).to_csv(
+            vis_csv, index=False, encoding="utf-8-sig"
+        )
+
+    sent_stats_csv = os.path.join(log_dir, f"{prefix}_sentence_stats.csv")
+    gpu_timing_csv = os.path.join(log_dir, f"{prefix}_gpu_timing.csv")
+    gpu_done_csv = os.path.join(log_dir, f"{prefix}_gpu_done.csv")
+    gpu_timeout_csv = os.path.join(log_dir, f"{prefix}_gpu_timeout.csv")
+    cpu_timing_csv = os.path.join(log_dir, f"{prefix}_cpu_timing.csv")
+    inflight_csv = os.path.join(log_dir, f"{prefix}_inflight.csv")
+
+    if not os.path.exists(sent_stats_csv):
+        with open(sent_stats_csv, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(["id","sentence_len","bunsetsu_cnt","cells","parallel_sum_all","cand_ast_estimate"])
-    if not os.path.exists(GPU_TIMING_CSV):
-        with open(GPU_TIMING_CSV, "w", newline="", encoding="utf-8") as f:
+    if not os.path.exists(gpu_timing_csv):
+        with open(gpu_timing_csv, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(["id","t_analyze_sec","payload_size_bytes"])
-    if not os.path.exists(GPU_DONE_CSV):
-        with open(GPU_DONE_CSV, "w", newline="", encoding="utf-8") as f:
+    if not os.path.exists(gpu_done_csv):
+        with open(gpu_done_csv, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(["ts_sec","id"])
-    if not os.path.exists(GPU_TIMEOUT_CSV):
-        with open(GPU_TIMEOUT_CSV, "w", newline="", encoding="utf-8") as f:
+    if not os.path.exists(gpu_timeout_csv):
+        with open(gpu_timeout_csv, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(["ts_sec","id"])
-    if not os.path.exists(CPU_TIMING_CSV):
-        with open(CPU_TIMING_CSV, "w", newline="", encoding="utf-8") as f:
+    if not os.path.exists(cpu_timing_csv):
+        with open(cpu_timing_csv, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(["id","t_filter_sec","t_match_sec","cand_asts","filtered_asts","timeout"])
-    if not os.path.exists(INFLIGHT_CSV):
-        with open(INFLIGHT_CSV, "w", newline="", encoding="utf-8") as f:
+    if not os.path.exists(inflight_csv):
+        with open(inflight_csv, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(["ts_sec","inflight_gpu","inflight_cpu","done_gpu","done_cpu","submitted_gpu","submitted_cpu"])
 
-    # 文ごとの重さ指標
-    with open(SENT_STATS_CSV, "a", newline="", encoding="utf-8") as fstats:
+    with open(sent_stats_csv, "a", newline="", encoding="utf-8") as fstats:
         wstats = csv.writer(fstats)
         for row in rows:
             s = row["sent"]
@@ -744,39 +759,31 @@ def main():
                 cand_est += len(ast_dict.get(v, []))
             wstats.writerow([row["id"], len(s), B, cells, par_total, cand_est])
 
-    # ast_dict を親に保持（spawn/fork両対応）
     global_ast_dict = ast_dict
 
-    # --------- 監督ループ開始 ---------
     start_ts = time.time()
 
-    # GPU/CPU スロット
     ctx_gpu = mp.get_context("spawn")
     try:
         ctx_cpu = mp.get_context("fork")
     except ValueError:
         ctx_cpu = mp.get_context("spawn")
 
-    gpu_slots = []   # list of dict(proc, parent_conn, start, device_id, row_id)
-    cpu_slots = []   # list of dict(proc, parent_conn, start, row_id)
-
+    gpu_slots = []
+    cpu_slots = []
     gpu_idx = 0
     done_gpu = 0
     submitted_gpu = 0
-
     submitted_cpu = 0
     done_cpu = 0
 
-    # 軽い文から処理
     rows.sort(key=lambda r: (len(r["clauses"]) * (len(r["clauses"])-1)) // 2)
 
     gpu_pbar = tqdm(total=total_gpu, desc="GPU stage")
     cpu_pbar = tqdm(total=total_cpu, desc="CPU stage")
 
-    # CPU投入待ちキュー（GPU完了payload）
     cpu_queue = []
 
-    # inflight ログ
     last_inflight_log = time.time()
     def log_inflight():
         nonlocal last_inflight_log
@@ -784,18 +791,16 @@ def main():
         if now - last_inflight_log >= 5.0:
             inflight_gpu = submitted_gpu - done_gpu
             inflight_cpu = submitted_cpu - done_cpu
-            with open(INFLIGHT_CSV, "a", newline="", encoding="utf-8") as finf:
+            with open(inflight_csv, "a", newline="", encoding="utf-8") as finf:
                 csv.writer(finf).writerow([f'{now - start_ts:.3f}', inflight_gpu, inflight_cpu,
                                            done_gpu, done_cpu, submitted_gpu, submitted_cpu])
             last_inflight_log = now
 
-    # メインイベントループ
     while (done_gpu < total_gpu) or gpu_slots or cpu_queue or cpu_slots:
-        # ---- GPU 起動補充 ----
         while len(gpu_slots) < GPU_WORKERS and gpu_idx < total_gpu:
             row = rows[gpu_idx]
             parent_conn, child_conn = ctx_gpu.Pipe(duplex=False)
-            dev_id = len(gpu_slots) % GPU_WORKERS  # 0/1を交互
+            dev_id = len(gpu_slots) % GPU_WORKERS
             p = ctx_gpu.Process(target=gpu_child_worker, args=(row, dev_id, child_conn), daemon=True)
             p.start()
             submitted_gpu += 1
@@ -804,11 +809,10 @@ def main():
                 "conn": parent_conn,
                 "start": time.time(),
                 "device_id": dev_id,
-                "row_id": row["id"]
+                "row_id": row["id"],
             })
             gpu_idx += 1
 
-        # ---- GPU 完了/タイムアウトチェック ----
         still_gpu = []
         for slot in gpu_slots:
             p: mp.Process = slot["proc"]
@@ -828,14 +832,14 @@ def main():
                     except Exception: pass
                     p.join(timeout=0.1)
 
-                with open(GPU_DONE_CSV, "a", newline="", encoding="utf-8") as fgd:
+                with open(gpu_done_csv, "a", newline="", encoding="utf-8") as fgd:
                     csv.writer(fgd).writerow([f'{time.time()-start_ts:.3f}', row_id])
 
                 if payload and "_error" in payload:
                     done_gpu += 1
                     gpu_pbar.update(1)
                 elif payload:
-                    with open(GPU_TIMING_CSV, "a", newline="", encoding="utf-8") as fgpu:
+                    with open(gpu_timing_csv, "a", newline="", encoding="utf-8") as fgpu:
                         csv.writer(fgpu).writerow([payload["id"],
                                                    f'{payload.get("t_analyze", 0.0):.6f}',
                                                    payload.get("payload_size", -1)])
@@ -851,7 +855,7 @@ def main():
                     except Exception: pass
                     try: p.join(timeout=0.5)
                     except Exception: pass
-                    with open(GPU_TIMEOUT_CSV, "a", newline="", encoding="utf-8") as fgt:
+                    with open(gpu_timeout_csv, "a", newline="", encoding="utf-8") as fgt:
                         csv.writer(fgt).writerow([f'{time.time()-start_ts:.3f}', row_id])
                     done_gpu += 1
                     gpu_pbar.update(1)
@@ -859,7 +863,6 @@ def main():
                     still_gpu.append(slot)
         gpu_slots = still_gpu
 
-        # ---- CPU 起動補充 ----
         while len(cpu_slots) < CPU_WORKERS and cpu_queue:
             payload = cpu_queue.pop(0)
             parent_conn, child_conn = ctx_cpu.Pipe(duplex=False)
@@ -871,10 +874,9 @@ def main():
                 "conn": parent_conn,
                 "start": time.time(),
                 "row_id": payload["id"],
-                "sentence": payload["sentence"]
+                "sentence": payload["sentence"],
             })
 
-        # ---- CPU 完了/タイムアウトチェック ----
         still_cpu = []
         for slot in cpu_slots:
             p: mp.Process = slot["proc"]
@@ -894,12 +896,11 @@ def main():
                     except Exception: pass
                     p.join(timeout=0.1)
 
-                # CPUログ/結果
                 if out and "_error" in out:
-                    with open(CPU_TIMING_CSV, "a", newline="", encoding="utf-8") as fcpu:
+                    with open(cpu_timing_csv, "a", newline="", encoding="utf-8") as fcpu:
                         csv.writer(fcpu).writerow([row_id, "0.000000", "0.000000", 0, 0, "error"])
                 elif out:
-                    with open(CPU_TIMING_CSV, "a", newline="", encoding="utf-8") as fcpu:
+                    with open(cpu_timing_csv, "a", newline="", encoding="utf-8") as fcpu:
                         csv.writer(fcpu).writerow([
                             out.get("id",""),
                             f'{out.get("t_filter",0.0):.6f}',
@@ -908,24 +909,23 @@ def main():
                             out.get("filtered_asts",0),
                             ""
                         ])
-                    recs = out.get("recs", [])
-                    if recs:
-                        pd.DataFrame(recs).to_csv(
-                            RESULT_CSV, mode="a", header=False, index=False, encoding="utf-8-sig"
+                    candidate_rows = out.get("candidates", [])
+                    if candidate_rows:
+                        pd.DataFrame(candidate_rows).to_csv(
+                            candidate_csv, mode="a", header=False, index=False, encoding="utf-8-sig"
                         )
-                    # ★ 可視化行の追記
                     vis_rows = out.get("vis", [])
                     if vis_rows:
                         pd.DataFrame(vis_rows).to_csv(
-                            VIS_CSV, mode="a", header=False, index=False, encoding="utf-8-sig"
+                            vis_csv, mode="a", header=False, index=False, encoding="utf-8-sig"
                         )
-                    triple_rows = out.get("triples", [])
-                    if triple_rows:
-                        pd.DataFrame(triple_rows).to_csv(
-                            TRIPLE_CSV, mode="a", header=False, index=False, encoding="utf-8-sig"
+                    verified_rows = out.get("verified", [])
+                    if verified_rows:
+                        pd.DataFrame(verified_rows).to_csv(
+                            verified_csv, mode="a", header=False, index=False, encoding="utf-8-sig"
                         )
                 else:
-                    with open(CPU_TIMING_CSV, "a", newline="", encoding="utf-8") as fcpu:
+                    with open(cpu_timing_csv, "a", newline="", encoding="utf-8") as fcpu:
                         csv.writer(fcpu).writerow([row_id, "0.000000", "0.000000", 0, 0, "empty"])
 
                 done_cpu += 1
@@ -936,7 +936,7 @@ def main():
                     except Exception: pass
                     try: p.join(timeout=0.5)
                     except Exception: pass
-                    with open(CPU_TIMING_CSV, "a", newline="", encoding="utf-8") as fcpu:
+                    with open(cpu_timing_csv, "a", newline="", encoding="utf-8") as fcpu:
                         csv.writer(fcpu).writerow([row_id, f'{CPU_TOTAL_TIMEOUT_SEC:.6f}', "0.000000", 0, 0, "timeout"])
                     done_cpu += 1
                     cpu_pbar.update(1)
@@ -944,10 +944,7 @@ def main():
                     still_cpu.append(slot)
         cpu_slots = still_cpu
 
-        # inflight定期ログ
         log_inflight()
-
-        # 小休止
         time.sleep(0.01)
 
     gpu_pbar.close()
@@ -956,9 +953,26 @@ def main():
     elapsed = time.time() - start_ts
     print("抽出処理時間: {:.1f} 秒".format(elapsed))
     print("=== 抽出完了（逐次書き込み） ===")
-    print("保存先(抽出): {}".format(RESULT_CSV))
-    print("保存先(可視化): {}".format(VIS_CSV))
-    print("ログ: {}".format(LOG_DIR))
+    print("保存先(candidate): {}".format(candidate_csv))
+    print("保存先(verified): {}".format(verified_csv))
+    print("保存先(可視化): {}".format(vis_csv))
+    print("ログ: {}".format(log_dir))
+def main():
+    print("パターンJSONをロード中…")
+    patterns = load_and_compile_patterns(
+        index_path=PATTERN_INDEX_JSON,
+        jsonl_path=PATTERN_JSONL,
+    )
+    ast_dict = build_ast_dict(patterns)
+    print("ロード完了: {} パターン".format(len(patterns)))
+
+    jsonl_paths = sorted(glob(os.path.join(INPUT_JSONL_DIR, "*.jsonl")))
+    if not jsonl_paths:
+        print(f"入力JSONLが見つかりません: {INPUT_JSONL_DIR}")
+        return
+
+    for path in jsonl_paths:
+        process_jsonl(path, ast_dict)
 
 
 # =============================================================
