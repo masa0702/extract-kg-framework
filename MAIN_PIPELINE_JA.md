@@ -1,7 +1,9 @@
-# main.py 実行フロー詳細（現状仕様）
+# main.py 実行フロー詳細（現状仕様 + 検証仕様の確定版）
 
 本ドキュメントは `src/main.py` の**現状の挙動**を日本語で詳細にまとめたものです。
 各処理の入出力を示し、全体フローと合わせて説明します。
+また、E2E運用で問題になりやすい「オントロジー整合検証（LLMプロンプト判定）」については、
+**仕様を確定した形**で整理し、現状実装との差分（修正方針）も併記します。
 
 ## 1. 全体像（ざっくり）
 1. パターン定義の読み込み → AST化 → コンパイル → 高速利用
@@ -220,15 +222,61 @@
 3) domain/range概念を決定
    - conceptがQIDのみの場合はオントロジーから日本語ラベルを引く
 
-4) プロンプトごとの検証
-   - arg1/arg2タイプ（prompt_id=04,10）は、2引数を組み合わせて判定
-   - side固定タイプ（01,15,17,21）は domain/range それぞれで判定
+4) プロンプト種別の判定（prompts.json）
+   - **2値（0/1）・side別判定タイプ**: `01,15,17,21`
+     - `side=domain` / `side=range` を分けて判定する前提
+   - **3値（0/1/2）・方向判定タイプ**: `04`
+     - `arg1/arg2` を同時に与え、`verdict=1` で (arg1=domain,arg2=range)、`verdict=2` で逆、`verdict=0` で棄却
+   - **2値（0/1）・同義語生成ゲート**: `10`
+     - プロンプト本文に「domain/range の割当は確定しなくてよい」と明記されているため、
+       そのまま **verified triple の採否判定に使うのは不適切**（現状は判定に混ざりうる）。
+       運用上は「候補の正規化/同義語生成の前処理」用途に限定し、最終採否は `21` 等で行うのが妥当。
 
-5) verdict!=0 のもののみ Triple として採用
+5) **X引数（argument候補）の扱い：仕様確定**
+   - 多くのパターンは `X` が2つ（`x_values=[A,B]`）になることが多い。
+   - その場合は「どちらが domain / range か」を **プロンプトで決定**する。
+
+   5.1) Xが2つ（基本ケース）: `x_values=[A,B]`
+   - 目的: domain/range を **ペアとして確定**し、確定したときだけ verified を生成する。
+   - 2値（side別）プロンプトの場合（01/15/17/21）:
+     1. まず `A` を `side=domain` で判定
+     2. `A` が domain としてOK（verdict=1）なら、`B` を `side=range` で判定
+        - `B` もOKなら verified: (domain=A, range=B)
+        - `B` がNGなら、**入れ替え候補**として (domain=B, range=A) を試す（下へ）
+     3. `A` が domain としてNG（verdict=0）なら、`B` を `side=domain` で判定
+     4. `B` が domain としてOK（verdict=1）なら、`A` を `side=range` で判定
+        - `A` もOKなら verified: (domain=B, range=A)
+     5. どちらの割当も成立しなければ棄却（verifiedなし）
+
+     補足:
+     - 現状実装は「domainだけOK / rangeだけOK」を単独で verified に入れる経路があり得るため、
+       上記の **“ペア確定のみ採用”** へ修正するのが望ましい。
+
+   - 3値（方向判定）プロンプトの場合（04）:
+     - `arg1=A, arg2=B` を1回投げる
+       - verdict=1 → verified: (domain=A, range=B)
+       - verdict=2 → verified: (domain=B, range=A)
+       - verdict=0 → 棄却
+
+   5.2) Xが3つ以上（例: `x_values=[A,B,C,...]`）: 並列構造がある前提
+   - 基本方針:
+     - `&` や `ParallelNode` により並列構造が表現されるはずで、並列構造検証（LLM）をパターンマッチング後に実行する。
+     - 並列検証が通った「並列グループ」は **同一として扱う**。
+   - ルール:
+     - 並列要素同士（例: AとBが並列）は domain/range のペア候補として禁止（(A,B) はプロンプト検証前に棄却）
+     - 並列グループと非並列要素（例: C）の組合せは検証対象
+       - 例: A,B が並列、Cが別要素の場合 → (A,C) と (B,C) をそれぞれ検証
+   - 3値判定（04）でも同様に「許可されたペア集合」に対して判定を行う
+
+6) 生成する verified の条件（最終）
+   - 「2値・side別」では **domain/range のペアが成立したときのみ** verified を生成する
+   - 「3値・方向判定」では verdict=1/2 のときのみ verified を生成する
+   - それ以外は棄却（candidate は残る）
 
 **出力**
 - verified 出力に追記（列名は candidate と同一）
 - 検証用プロンプトを JSONL で保存
+  - `prompt_log.jsonl` には **verdict を必ず記録**する（どの判定が 0/1/2 だったかを後から追えることが重要）
 
 **利用コード/モデル**
 - `src/main.py`
@@ -267,6 +315,12 @@
 - GPU/CPUプロセスはタイムアウト時に強制終了される
 - LLM検証（並列判定/オントロジー判定）は vLLM(OpenAI互換) の `chat_json` を利用
 - candidate / verified は**同一列名**の出力として分離される
+- 推奨: 研究運用での再現性のため、以下を固定/明示する
+  - Hugging Face キャッシュ（例: `HF_HOME=/workspace/.cache/huggingface`）
+  - オフライン実行（必要に応じて）: `HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`
+  - CKY候補の組合せ爆発を防ぐ上限（必要に応じて）:
+    - `CKY_MAX_CHILD_CANDIDATES`（セル結合時に参照する左右候補数の上限）
+    - `CKY_MAX_CELL_CANDIDATES_TOTAL`（各セルの候補総数上限）
 
 ---
 

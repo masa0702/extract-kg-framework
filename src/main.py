@@ -524,6 +524,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                 "mode": "pair",
                                 "arg1": arg1,
                                 "arg2": arg2,
+                                "verdict": verdict,
                                 "prompt_text": prompt_text,
                             })
                             if verdict == 0:
@@ -588,6 +589,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                     "mode": "domain",
                                     "argument": arg,
                                     "other_argument": other_arg,
+                                    "verdict": verdict_domain,
                                     "prompt_text": prompt_text,
                                 })
 
@@ -613,6 +615,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                     "mode": "range",
                                     "argument": arg,
                                     "other_argument": other_arg,
+                                    "verdict": verdict_range,
                                     "prompt_text": prompt_text,
                                 })
 
