@@ -1,6 +1,7 @@
-# amod_acl.py
+import os
 import torch
 from transformers import BertTokenizer, BertForMaskedLM
+from tqdm.auto import tqdm
 
 class MaskRelationDetector:
     def __init__(self, model_name="tohoku-nlp/bert-base-japanese-v3", candidate_tokens=None, device=None):
@@ -13,10 +14,23 @@ class MaskRelationDetector:
         """
         self.device = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.candidate_tokens = candidate_tokens if candidate_tokens is not None else ["な", "の"]
-        self.tokenizer = BertTokenizer.from_pretrained(model_name)
-        self.model = BertForMaskedLM.from_pretrained(model_name)
-        self.model.to(self.device)
-        self.model.eval()
+
+        show_progress = str(os.getenv("SHOW_MODEL_PROGRESS", "")).lower() in ("1", "true", "yes")
+        pbar = tqdm(total=3, desc="load mask-bert", leave=False) if show_progress else None
+        try:
+            self.tokenizer = BertTokenizer.from_pretrained(model_name)
+            if pbar:
+                pbar.update(1)
+            self.model = BertForMaskedLM.from_pretrained(model_name)
+            if pbar:
+                pbar.update(1)
+            self.model.to(self.device)
+            self.model.eval()
+            if pbar:
+                pbar.update(1)
+        finally:
+            if pbar:
+                pbar.close()
 
 
     def predict_relation(self, text_A, text_B, top_k=5):

@@ -1,5 +1,5 @@
 import json
-from typing import Any, Iterable, List, Sequence
+from typing import Any, Dict, Iterable, List, Sequence
 
 from config.filter_settings import PARALLEL_KEYS
 

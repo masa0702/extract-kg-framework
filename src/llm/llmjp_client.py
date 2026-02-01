@@ -245,6 +245,24 @@ def get_llmjp_http(
     多回呼び出しで Session を毎回作らないための最適化。
     """
     # base_urls が指定されていなければ、環境変数 LLMJP_BASE_URLS を参照
+    env_timeout = os.getenv("LLMJP_TIMEOUT_SEC")
+    env_retries = os.getenv("LLMJP_MAX_RETRIES")
+    env_backoff = os.getenv("LLMJP_BACKOFF_SEC")
+    if env_timeout:
+        try:
+            timeout_sec = float(env_timeout)
+        except Exception:
+            pass
+    if env_retries:
+        try:
+            max_retries = int(env_retries)
+        except Exception:
+            pass
+    if env_backoff:
+        try:
+            backoff_sec = float(env_backoff)
+        except Exception:
+            pass
     env_urls = _split_base_urls(os.getenv("LLMJP_BASE_URLS"))
     resolved_urls = list(base_urls) if base_urls is not None else (env_urls or None)
     resolved_url0 = (base_url or os.getenv("LLMJP_BASE_URL", "http://llmjp:8000/v1")).rstrip("/")

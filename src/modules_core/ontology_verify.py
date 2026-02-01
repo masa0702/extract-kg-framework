@@ -44,7 +44,13 @@ def render_prompt(template: PromptTemplate, values: Dict[str, Any]) -> str:
     formatter = string.Formatter()
     keys = {fname for _, fname, _, _ in formatter.parse(template.prompt_text) if fname}
     safe_values = {k: (values.get(k, "") or "") for k in keys}
-    return template.prompt_text.format_map(_SafeDict(safe_values))
+    try:
+        return template.prompt_text.format_map(_SafeDict(safe_values))
+    except Exception:
+        out = template.prompt_text
+        for k, v in safe_values.items():
+            out = out.replace("{" + k + "}", str(v))
+        return out
 
 
 def _load_json(path: str) -> Dict[str, Any]:

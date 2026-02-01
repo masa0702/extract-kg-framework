@@ -53,17 +53,42 @@ from modules_core.ontology_verify import (
     render_prompt,
     prompt_requires_pair,
     pick_other_argument,
+    normalize_text,
 )
 
-PATTERN_INDEX_JSON = "../data/patterns/patterns.index.json"
-PATTERN_JSONL = "../data/patterns/patterns.jsonl"
-INPUT_JSONL_DIR = "../data/T2KGB_JA/target_data"
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-RESULTS_ROOT = "../results/extract_pred_arg_pair"
+PATTERN_INDEX_JSON = os.getenv(
+    "PATTERN_INDEX_JSON",
+    os.path.join(REPO_ROOT, "data/patterns/patterns.index.json"),
+)
+PATTERN_JSONL = os.getenv(
+    "PATTERN_JSONL",
+    os.path.join(REPO_ROOT, "data/patterns/patterns.jsonl"),
+)
+INPUT_JSONL_DIR = os.getenv(
+    "INPUT_JSONL_DIR",
+    os.path.join(REPO_ROOT, "data/T2KGB_JA/target_data"),
+)
+RESULTS_ROOT = os.getenv(
+    "RESULTS_ROOT",
+    os.path.join(REPO_ROOT, "results/extract_pred_arg_pair"),
+)
 
-PROMPTS_JSON = "../prompts/prompts.json"
-RELATION_PROMPT_MAP_JSON = "../prompts/relation_prompt_map.json"
-ONTOLOGY_DIR = "../ontology"
+EXPORT_AST_REPR = os.getenv("EXPORT_AST_REPR", "") == "1"
+
+PROMPTS_JSON = os.getenv(
+    "PROMPTS_JSON",
+    os.path.join(REPO_ROOT, "prompts/prompts.json"),
+)
+RELATION_PROMPT_MAP_JSON = os.getenv(
+    "RELATION_PROMPT_MAP_JSON",
+    os.path.join(REPO_ROOT, "prompts/relation_prompt_map.json"),
+)
+ONTOLOGY_DIR = os.getenv(
+    "ONTOLOGY_DIR",
+    os.path.join(REPO_ROOT, "ontology"),
+)
 
 ONTOLOGY_ID_COL_CANDIDATES = [
     "ontology_id",
@@ -103,6 +128,32 @@ def extract_parallel_variables(ast):
                         visit(child)
     visit(ast)
     return [f"{v.symbol}{v.index}" for v in vars_]
+
+def extract_relation_candidates_from_sentence(
+    sentence: str,
+    ontology_id: str,
+    resolver,
+) -> list[str]:
+    if not sentence:
+        return []
+    ont = normalize_text(ontology_id)
+    rows = getattr(resolver, "_rows", [])
+    out = []
+    for row in rows:
+        if ont and normalize_text(row.get("ontology_id")) != ont:
+            continue
+        pred = normalize_text(row.get("predicate_ja"))
+        if pred and pred in sentence:
+            out.append(pred)
+    # preserve order of appearance in sentence
+    uniq = []
+    seen = set()
+    for pred in out:
+        if pred in seen:
+            continue
+        seen.add(pred)
+        uniq.append(pred)
+    return uniq
 
 def clean_variable_mapping(varmap, clauses):
     new_map = {}
@@ -358,6 +409,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
         vis_rows = []
         verified = []
         seen_triples = set()
+        prompt_logs = []
 
         for entry in filtered:
             ast = entry["ast"]
@@ -415,10 +467,24 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                 x_values = [v for _, v in Xs]
                 y_values = [v for _, v in Ys]
 
+                resolved_rows = {}
                 for rel in y_values:
                     row = ontology_resolver.resolve_relation_row(rel, ontology_id)
-                    if not row:
-                        continue
+                    if row:
+                        resolved_rows[rel] = row
+
+                if not resolved_rows:
+                    fallback_rels = extract_relation_candidates_from_sentence(
+                        sentence,
+                        ontology_id,
+                        ontology_resolver,
+                    )
+                    for rel in fallback_rels:
+                        row = ontology_resolver.resolve_relation_row(rel, ontology_id)
+                        if row:
+                            resolved_rows[rel] = row
+
+                for rel, row in resolved_rows.items():
                     prompt_id = row.get("prompt_id", "")
                     prompt = ontology_resolver.get_prompt(prompt_id)
                     if not prompt:
@@ -449,6 +515,17 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                 },
                             )
                             verdict = ontology_judge.judge_prompt(prompt_text)
+                            prompt_logs.append({
+                                "id": sent_id,
+                                "relation_ja": rel,
+                                "ontology_id": ontology_id,
+                                "prompt_id": prompt_id,
+                                "prompt_name": prompt_name,
+                                "mode": "pair",
+                                "arg1": arg1,
+                                "arg2": arg2,
+                                "prompt_text": prompt_text,
+                            })
                             if verdict == 0:
                                 continue
 
@@ -502,6 +579,17 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                     },
                                 )
                                 verdict_domain = ontology_judge.judge_prompt(prompt_text)
+                                prompt_logs.append({
+                                    "id": sent_id,
+                                    "relation_ja": rel,
+                                    "ontology_id": ontology_id,
+                                    "prompt_id": prompt_id,
+                                    "prompt_name": prompt_name,
+                                    "mode": "domain",
+                                    "argument": arg,
+                                    "other_argument": other_arg,
+                                    "prompt_text": prompt_text,
+                                })
 
                             if range_concept:
                                 prompt_text = render_prompt(
@@ -516,6 +604,17 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                     },
                                 )
                                 verdict_range = ontology_judge.judge_prompt(prompt_text)
+                                prompt_logs.append({
+                                    "id": sent_id,
+                                    "relation_ja": rel,
+                                    "ontology_id": ontology_id,
+                                    "prompt_id": prompt_id,
+                                    "prompt_name": prompt_name,
+                                    "mode": "range",
+                                    "argument": arg,
+                                    "other_argument": other_arg,
+                                    "prompt_text": prompt_text,
+                                })
 
                             if verdict_domain and not verdict_range:
                                 domain_arg, range_arg = arg, ""
@@ -553,10 +652,12 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                 "stage": "verified",
                             })
 
-                vis_rows.append({
+                vis_row = {
                     "id": sent_id,
                     "sentence": sentence,
                     "ast_uid": ast_uid,
+                    "pattern_id": entry.get("pattern_id", ""),
+                    "pattern": entry.get("pattern", ""),
                     "var_count": var_cnt,
                     "parallel_var_count": par_cnt,
                     "literals": "|".join(literals) if literals else "",
@@ -566,7 +667,10 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                     "varmap_clean": json.dumps(varmap_clean, ensure_ascii=False),
                     "parallel_var_names": json.dumps(par_names, ensure_ascii=False),
                     "parallel_elements": json.dumps(par_elems, ensure_ascii=False),
-                })
+                }
+                if EXPORT_AST_REPR:
+                    vis_row["ast_repr"] = repr(ast)
+                vis_rows.append(vis_row)
 
         t_match = time.time() - t1
 
@@ -575,6 +679,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
             "candidates": candidates,
             "vis": vis_rows,
             "verified": verified,
+            "prompt_logs": prompt_logs,
             "t_filter": t_filter,
             "t_match": t_match,
             "cand_asts": len(candidate_asts),
@@ -708,9 +813,11 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
         )
 
     vis_cols = [
-        "id","sentence","ast_uid","var_count","parallel_var_count","literals",
+        "id","sentence","ast_uid","pattern_id","pattern","var_count","parallel_var_count","literals",
         "X_vars","Y_vars","varmap_raw","varmap_clean","parallel_var_names","parallel_elements"
     ]
+    if EXPORT_AST_REPR:
+        vis_cols.append("ast_repr")
     if not os.path.exists(vis_csv):
         pd.DataFrame(columns=vis_cols).to_csv(
             vis_csv, index=False, encoding="utf-8-sig"
@@ -722,6 +829,10 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
     gpu_timeout_csv = os.path.join(log_dir, f"{prefix}_gpu_timeout.csv")
     cpu_timing_csv = os.path.join(log_dir, f"{prefix}_cpu_timing.csv")
     inflight_csv = os.path.join(log_dir, f"{prefix}_inflight.csv")
+    prompt_log_path = os.path.join(output_dir, f"{prefix}_prompt_log.jsonl")
+    if not os.path.exists(prompt_log_path):
+        with open(prompt_log_path, "w", encoding="utf-8") as _:
+            pass
 
     if not os.path.exists(sent_stats_csv):
         with open(sent_stats_csv, "w", newline="", encoding="utf-8") as f:
@@ -789,6 +900,10 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
         nonlocal last_inflight_log
         now = time.time()
         if now - last_inflight_log >= 5.0:
+            os.makedirs(log_dir, exist_ok=True)
+            if not os.path.exists(inflight_csv):
+                with open(inflight_csv, "w", newline="", encoding="utf-8") as f:
+                    csv.writer(f).writerow(["ts_sec","inflight_gpu","inflight_cpu","done_gpu","done_cpu","submitted_gpu","submitted_cpu"])
             inflight_gpu = submitted_gpu - done_gpu
             inflight_cpu = submitted_cpu - done_cpu
             with open(inflight_csv, "a", newline="", encoding="utf-8") as finf:
@@ -924,6 +1039,11 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
                         pd.DataFrame(verified_rows).to_csv(
                             verified_csv, mode="a", header=False, index=False, encoding="utf-8-sig"
                         )
+                    prompt_rows = out.get("prompt_logs", [])
+                    if prompt_rows:
+                        with open(prompt_log_path, "a", encoding="utf-8") as fpl:
+                            for row in prompt_rows:
+                                fpl.write(json.dumps(row, ensure_ascii=False) + "\n")
                 else:
                     with open(cpu_timing_csv, "a", newline="", encoding="utf-8") as fcpu:
                         csv.writer(fcpu).writerow([row_id, "0.000000", "0.000000", 0, 0, "empty"])

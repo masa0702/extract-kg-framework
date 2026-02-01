@@ -1,4 +1,5 @@
 import json
+import os
 
 try:
     from .mask_module import MaskRelationDetector
@@ -15,20 +16,70 @@ from modules_core.cky_table import CkyTable
 class CKYAnalyzer:
     def __init__(self,
                  mask_model_path=None,
-                 dep_mod_model_path="./models/output_bert_dependency_bunsetsu_ver3.0/depbert_bunsetsu_20260117_072956/final_model",
+                 dep_mod_model_path=None,
                 ):
+        self.mask_detector = None
+        self.dep_mod_detector = None
+        self.use_model = False
+        self.model_error = ""
+
         if _BERT_AVAILABLE:
-            self.mask_detector = MaskRelationDetector(model_name=mask_model_path or "tohoku-nlp/bert-base-japanese-v3")
-            self.dep_mod_detector = DependencyModificationRelationDetector(model_path=dep_mod_model_path)
-            self.use_model = True
+            disable_mask = str(os.getenv("DISABLE_MASK_BERT", "")).lower() in ("1", "true", "yes")
+            env_mask_path = os.getenv("MASK_BERT_MODEL_PATH", "").strip()
+            env_mask_name = os.getenv("MASK_BERT_MODEL_NAME", "").strip()
+            if env_mask_path:
+                mask_model_path = env_mask_path
+            try:
+                if not disable_mask:
+                    self.mask_detector = MaskRelationDetector(
+                        model_name=env_mask_name or mask_model_path or "tohoku-nlp/bert-base-japanese-v3"
+                    )
+            except Exception as e:
+                self.model_error = f"mask_detector init failed: {e}"
+                self.mask_detector = None
+
+            if dep_mod_model_path is None:
+                dep_mod_model_path = os.getenv(
+                    "DEP_BERT_MODEL_PATH",
+                    "/workspace/src/modules_bert/models/output_bert_dependency_bunsetsu_ver3.0/depbert_bunsetsu_20260117_072956/final_model",
+                )
+            try:
+                if not dep_mod_model_path or not os.path.isdir(dep_mod_model_path):
+                    raise FileNotFoundError(f"dep_bert model not found: {dep_mod_model_path}")
+                self.dep_mod_detector = DependencyModificationRelationDetector(
+                    model_path=dep_mod_model_path
+                )
+            except Exception as e:
+                if self.model_error:
+                    self.model_error += " | "
+                self.model_error += f"dep_mod_detector init failed: {e}"
+                self.dep_mod_detector = None
+
+            if self.dep_mod_detector is None:
+                raise RuntimeError(self.model_error or "dep_mod_detector init failed")
+
+            if (self.mask_detector is not None) or (self.dep_mod_detector is not None):
+                self.use_model = True
         else:
-            # Fallback: no external models
-            self.mask_detector = None
-            self.dep_mod_detector = None
             self.use_model = False
 
     def analyze_cky_table(self, cky_table):
         n = len(cky_table) - 1  # CKY表は0行0列がヘッダなので-1
+        # NOTE:
+        # Building candidates by enumerating every combination of (left_candidates x right_candidates)
+        # across spans can explode combinatorially and make even 1 sentence take >10 minutes.
+        # We cap how many child candidates are considered when combining spans.
+        try:
+            max_child = int(os.getenv("CKY_MAX_CHILD_CANDIDATES", "1"))
+        except Exception:
+            max_child = 1
+        try:
+            max_cell_total = int(os.getenv("CKY_MAX_CELL_CANDIDATES_TOTAL", "64"))
+        except Exception:
+            max_cell_total = 64
+        max_child = max(1, max_child)
+        max_cell_total = max(1, max_cell_total)
+
         # analyze_cky_table 実行前に一次対角セルを全て変換
         for i in range(1, len(cky_table)):
             cell = cky_table[i][i]
@@ -48,8 +99,8 @@ class CKYAnalyzer:
                     right_cell = cky_table[k+1][j]
                     if not (isinstance(left_cell, dict) and isinstance(right_cell, dict)):
                         continue
-                    left_candidates = left_cell.get("candidates", [])
-                    right_candidates = right_cell.get("candidates", [])
+                    left_candidates = (left_cell.get("candidates", []) or [])[:max_child]
+                    right_candidates = (right_cell.get("candidates", []) or [])[:max_child]
                     for left_cand in left_candidates:
                         for right_cand in right_candidates:
                             text_A = left_cand.get("text", "")
@@ -60,12 +111,13 @@ class CKYAnalyzer:
                             mod_result = 0
 
                             if self.use_model:
-                                dependency_label, _ = self.mask_detector.predict_relation(text_A, text_B)
-                                if dependency_label == "項-述語":
-                                    pred_result = 1
-                                elif dependency_label == "連体修飾":
-                                    acl_result = 1
-                                else:
+                                if self.mask_detector is not None:
+                                    dependency_label, _ = self.mask_detector.predict_relation(text_A, text_B)
+                                    if dependency_label == "項-述語":
+                                        pred_result = 1
+                                    elif dependency_label == "連体修飾":
+                                        acl_result = 1
+                                if (dependency_label is None) and (self.dep_mod_detector is not None):
                                     mod_result, _ = self.dep_mod_detector.predict_relation(text_A, text_B)
                                     if mod_result == 1:
                                         dependency_label = "依存関係"
@@ -102,6 +154,12 @@ class CKYAnalyzer:
                                     },
                                     "text": text_A + text_B
                                 })
+                                if len(candidates) >= max_cell_total:
+                                    break
+                        if len(candidates) >= max_cell_total:
+                            break
+                    if len(candidates) >= max_cell_total:
+                        break
                 # セルに候補・全判定結果を格納
                 if not isinstance(cky_table[i][j], dict):
                     cky_table[i][j] = {}

@@ -1,14 +1,29 @@
-# dependency_modification.py
+import os
 import torch
 from transformers import BertTokenizer, BertForSequenceClassification
+from tqdm.auto import tqdm
 
 class DependencyModificationRelationDetector:
-    def __init__(self, model_path="./models/output_bert_dependency_bunsetsu_ver3.0/depbert_bunsetsu_20260117_072956/final_model"):
-        self.tokenizer = BertTokenizer.from_pretrained(model_path)
-        self.model = BertForSequenceClassification.from_pretrained(model_path)
-        self.model.eval()
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model.to(self.device)
+    def __init__(self, model_path=None):
+        if model_path is None:
+            model_path = "/workspace/src/modules_bert/models/output_bert_dependency_bunsetsu_ver3.0/depbert_bunsetsu_20260117_072956/final_model"
+        show_progress = str(os.getenv("SHOW_MODEL_PROGRESS", "")).lower() in ("1", "true", "yes")
+        pbar = tqdm(total=3, desc="load dep-bert", leave=False) if show_progress else None
+        try:
+            self.tokenizer = BertTokenizer.from_pretrained(model_path)
+            if pbar:
+                pbar.update(1)
+            self.model = BertForSequenceClassification.from_pretrained(model_path)
+            if pbar:
+                pbar.update(1)
+            self.model.eval()
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.model.to(self.device)
+            if pbar:
+                pbar.update(1)
+        finally:
+            if pbar:
+                pbar.close()
 
     def predict_relation(self, text_a, text_b):
         """
