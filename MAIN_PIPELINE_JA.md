@@ -42,7 +42,10 @@
   - candidate 側は `prompt_id` / `verdict` などが空の場合がある
 - AST可視化ログ
   - `../results/.../<prefix>_ast_visualization.csv`
-  - 変数マッピングやリテラル情報など
+  - 変数マッピングやリテラル情報、`pattern_id`/`pattern` を含む
+  - `EXPORT_AST_REPR=1` のときは `ast_repr` を追加
+- 検証用プロンプトログ
+  - `../results/.../<prefix>_prompt_log.jsonl`
 - 進捗/診断ログ
   - `../results/.../logs/*.csv`
 
@@ -225,6 +228,7 @@
 
 **出力**
 - verified 出力に追記（列名は candidate と同一）
+- 検証用プロンプトを JSONL で保存
 
 **利用コード/モデル**
 - `src/main.py`
@@ -247,6 +251,7 @@
   - `../results/.../<prefix>_triples_candidate.csv`
   - `../results/.../<prefix>_triples_verified.csv`
 - `ast_visualization.csv`
+- `prompt_log.jsonl`
 
 ---
 
@@ -258,6 +263,7 @@
 
 ## 5. 注意点（現状実装）
 - 入力JSONLは `data/T2KGB_JA/target_data/` 配下に配置する
+- 主要パスは環境変数で上書き可能（`PATTERN_INDEX_JSON`, `PATTERN_JSONL`, `INPUT_JSONL_DIR`, `RESULTS_ROOT`）
 - GPU/CPUプロセスはタイムアウト時に強制終了される
 - LLM検証（並列判定/オントロジー判定）は vLLM(OpenAI互換) の `chat_json` を利用
 - candidate / verified は**同一列名**の出力として分離される
