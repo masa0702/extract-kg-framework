@@ -273,6 +273,31 @@
    - 「3値・方向判定」では verdict=1/2 のときのみ verified を生成する
    - それ以外は棄却（candidate は残る）
 
+7) 検証コスト削減（重複排除）: 仕様確定
+   - 背景:
+     - パターンマッチングは複数のパターンから同一の (relation, argument候補) を再度生成し得る。
+     - LLM検証（オントロジー検証）は高コストなため、同一入力を複数回投げるのは無駄になる。
+   - 方針:
+     - 「パターン単位」を維持しつつ、**LLM検証に入る直前**に「文単位（id単位）」で重複を排除する。
+     - 注意: ここでいう「文単位」は *候補の再生成（全Y×全Xなど）をしない*。あくまで **dedup（重複排除）** のみを行う。
+       - これにより relation を基準に組合せを抑える現行設計（パターン単位）を壊さない。
+
+   7.1) dedupキー（推奨）
+   - 3値（方向判定, prompt_id=04 など）:
+     - `key = (ontology_id, relation_ja, prompt_id, arg1, arg2)`
+     - **順序を保持**する（(A,B) と (B,A) は別）
+   - 2値（side別, 01/15/17/21）:
+     - domain判定: `key = (ontology_id, relation_ja, prompt_id, "domain", argument, other_argument)`
+     - range判定 : `key = (ontology_id, relation_ja, prompt_id, "range",  argument, other_argument)`
+     - `other_argument` はプロンプトに含まれるため、原則キーに含める（安全側）。
+
+   7.2) 実装上の注意
+   - 重複排除は「LLM呼び出し単位」で行う（prompt_text生成前でもよい）。
+   - LLMの内部キャッシュ（prompt_text→verdict）とは別に、**上流での重複排除**を入れることで、
+     - 無駄なprompt生成/JSONLログ肥大化も抑えられる。
+   - ただし、出力ログ（prompt_log.jsonl）で「なぜスキップされたか」を追いたい場合は、
+     - `skipped_duplicate=true` のような軽量フラグをログに入れる運用も検討する。
+
 **出力**
 - verified 出力に追記（列名は candidate と同一）
 - 検証用プロンプトを JSONL で保存
