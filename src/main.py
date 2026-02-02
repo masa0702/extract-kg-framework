@@ -433,6 +433,8 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
         verified = []
         seen_triples = set()
         prompt_logs = []
+        seen_prompt_calls = set()
+        log_dup_skips = str(os.getenv("LOG_DUPLICATE_SKIPS", "")).lower() in ("1", "true", "yes")
 
         def _is_parallel_pair(a: str, b: str, parallel_value_groups: list[list[str]]) -> bool:
             if not a or not b:
@@ -557,6 +559,24 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                             continue
 
                         for arg1, arg2 in _iter_allowed_pairs(x_values, parallel_value_groups):
+                            call_key = (ontology_id, rel, prompt_id, arg1, arg2)
+                            if call_key in seen_prompt_calls:
+                                if log_dup_skips:
+                                    prompt_logs.append({
+                                        "id": sent_id,
+                                        "relation_ja": rel,
+                                        "ontology_id": ontology_id,
+                                        "prompt_id": prompt_id,
+                                        "prompt_name": prompt_name,
+                                        "mode": "pair",
+                                        "arg1": arg1,
+                                        "arg2": arg2,
+                                        "verdict": None,
+                                        "skipped_duplicate": True,
+                                    })
+                                continue
+                            seen_prompt_calls.add(call_key)
+
                             prompt_text = render_prompt(
                                 prompt,
                                 {
@@ -629,6 +649,25 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                             continue
 
                         def _judge_side(side: str, concept: str, argument: str, other_argument: str) -> int:
+                            oa = other_argument or "NULL"
+                            call_key = (ontology_id, rel, prompt_id, side, argument, oa)
+                            if call_key in seen_prompt_calls:
+                                if log_dup_skips:
+                                    prompt_logs.append({
+                                        "id": sent_id,
+                                        "relation_ja": rel,
+                                        "ontology_id": ontology_id,
+                                        "prompt_id": prompt_id,
+                                        "prompt_name": prompt_name,
+                                        "mode": side,
+                                        "argument": argument,
+                                        "other_argument": oa,
+                                        "verdict": None,
+                                        "skipped_duplicate": True,
+                                    })
+                                return 0
+                            seen_prompt_calls.add(call_key)
+
                             prompt_text = render_prompt(
                                 prompt,
                                 {
@@ -636,7 +675,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                     "side": side,
                                     "concept_ja": concept,
                                     "argument": argument,
-                                    "other_argument": other_argument or "NULL",
+                                    "other_argument": oa,
                                     "context_sentence": sentence,
                                 },
                             )
@@ -649,7 +688,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                 "prompt_name": prompt_name,
                                 "mode": side,
                                 "argument": argument,
-                                "other_argument": other_argument or "NULL",
+                                "other_argument": oa,
                                 "verdict": v,
                                 "prompt_text": prompt_text,
                             })
