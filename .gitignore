@@ -196,3 +196,7 @@ translate*/
 data/
 learn_data/
 tmp_single_sentence_run/
+results/
+tmp_quick_input/
+tmp_quick_resutls/
+tmp_quick_resutls2/
