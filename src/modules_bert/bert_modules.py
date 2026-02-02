@@ -68,17 +68,55 @@ class CKYAnalyzer:
         # NOTE:
         # Building candidates by enumerating every combination of (left_candidates x right_candidates)
         # across spans can explode combinatorially and make even 1 sentence take >10 minutes.
-        # We cap how many child candidates are considered when combining spans.
-        try:
-            max_child = int(os.getenv("CKY_MAX_CHILD_CANDIDATES", "1"))
-        except Exception:
-            max_child = 1
-        try:
-            max_cell_total = int(os.getenv("CKY_MAX_CELL_CANDIDATES_TOTAL", "64"))
-        except Exception:
-            max_cell_total = 64
-        max_child = max(1, max_child)
-        max_cell_total = max(1, max_cell_total)
+        # Default guard (enabled) prevents combinatorial blow-ups.
+        # Set CKY_GUARD=0 to disable for experiments where maximum recall is preferred.
+        guard_off = str(os.getenv("CKY_GUARD", "")).lower() in ("0", "false", "no", "off")
+
+        def _parse_int_with_default(env_key: str, default: int) -> int:
+            raw = (os.getenv(env_key, "") or "").strip()
+            if raw == "":
+                return default
+            try:
+                v = int(raw)
+            except Exception:
+                return default
+            return v if v > 0 else default
+
+        max_child = None
+        max_cell_total = None
+        if not guard_off:
+            # Defaults per MAIN_PIPELINE_JA.md
+            max_child = _parse_int_with_default("CKY_MAX_CHILD_CANDIDATES", 6)
+            max_cell_total = _parse_int_with_default("CKY_MAX_CELL_CANDIDATES_TOTAL", 34)
+
+        # Lightweight stats for diagnostics (read by gpu_child_worker/main).
+        self.last_stats = {
+            "max_child": max_child,
+            "max_cell_total": max_cell_total,
+            "pair_evals": 0,
+            "mask_calls": 0,
+            "dep_calls": 0,
+            "cells_with_candidates": 0,
+            "candidates_total": 0,
+        }
+
+        # Search stop condition:
+        # The DP parent only consumes up to `max_child` candidates from each child cell.
+        # Searching far beyond that can explode model calls without improving downstream results.
+        search_target_per_cell = None
+        if (max_child is not None) and (max_cell_total is not None):
+            search_target_per_cell = min(max_child, max_cell_total)
+        elif max_child is not None:
+            search_target_per_cell = max_child
+        elif max_cell_total is not None:
+            search_target_per_cell = max_cell_total
+
+        # Hard safety cap on evaluated (text_A, text_B) pairs per cell to prevent stalls.
+        # (Enabled only when guard is ON.)
+        max_pair_evals_per_cell = 2048 if not guard_off else None
+
+        # Memoize relation predictions within this sentence/table to reduce repeated calls.
+        _pair_cache = {}
 
         # analyze_cky_table 実行前に一次対角セルを全て変換
         for i in range(1, len(cky_table)):
@@ -94,13 +132,17 @@ class CKYAnalyzer:
                 j = i + span - 1
                 candidates = []
                 all_results = []  # ← 全てのペアと判定結果を記録
+                pair_evals_in_cell = 0
                 for k in range(i, j):
                     left_cell = cky_table[i][k]
                     right_cell = cky_table[k+1][j]
                     if not (isinstance(left_cell, dict) and isinstance(right_cell, dict)):
                         continue
-                    left_candidates = (left_cell.get("candidates", []) or [])[:max_child]
-                    right_candidates = (right_cell.get("candidates", []) or [])[:max_child]
+                    left_candidates = (left_cell.get("candidates", []) or [])
+                    right_candidates = (right_cell.get("candidates", []) or [])
+                    if max_child is not None:
+                        left_candidates = left_candidates[:max_child]
+                        right_candidates = right_candidates[:max_child]
                     for left_cand in left_candidates:
                         for right_cand in right_candidates:
                             text_A = left_cand.get("text", "")
@@ -110,25 +152,38 @@ class CKYAnalyzer:
                             acl_result = 0
                             mod_result = 0
 
-                            if self.use_model:
-                                if self.mask_detector is not None:
-                                    dependency_label, _ = self.mask_detector.predict_relation(text_A, text_B)
-                                    if dependency_label == "項-述語":
-                                        pred_result = 1
-                                    elif dependency_label == "連体修飾":
-                                        acl_result = 1
-                                if (dependency_label is None) and (self.dep_mod_detector is not None):
-                                    mod_result, _ = self.dep_mod_detector.predict_relation(text_A, text_B)
-                                    if mod_result == 1:
-                                        dependency_label = "依存関係"
+                            cache_key = (text_A, text_B)
+                            cached = _pair_cache.get(cache_key)
+                            if cached is not None:
+                                dependency_label, pred_result, acl_result, mod_result = cached
                             else:
-                                # Heuristic fallback: simple rule based on tokens
-                                if text_A.endswith("を") or text_B.endswith("する"):
-                                    dependency_label = "項-述語"
-                                    pred_result = 1
-                                elif text_A.endswith("な") or text_A.endswith("の"):
-                                    dependency_label = "連体修飾"
-                                    acl_result = 1
+                                if self.use_model:
+                                    if self.mask_detector is not None:
+                                        self.last_stats["mask_calls"] += 1
+                                        dependency_label, _ = self.mask_detector.predict_relation(text_A, text_B)
+                                        if dependency_label == "項-述語":
+                                            pred_result = 1
+                                        elif dependency_label == "連体修飾":
+                                            acl_result = 1
+                                    if (dependency_label is None) and (self.dep_mod_detector is not None):
+                                        self.last_stats["dep_calls"] += 1
+                                        mod_result, _ = self.dep_mod_detector.predict_relation(text_A, text_B)
+                                        if mod_result == 1:
+                                            dependency_label = "依存関係"
+                                else:
+                                    # Heuristic fallback: simple rule based on tokens
+                                    if text_A.endswith("を") or text_B.endswith("する"):
+                                        dependency_label = "項-述語"
+                                        pred_result = 1
+                                    elif text_A.endswith("な") or text_A.endswith("の"):
+                                        dependency_label = "連体修飾"
+                                        acl_result = 1
+                                _pair_cache[cache_key] = (dependency_label, pred_result, acl_result, mod_result)
+
+                            pair_evals_in_cell += 1
+                            self.last_stats["pair_evals"] += 1
+                            if (max_pair_evals_per_cell is not None) and (pair_evals_in_cell >= max_pair_evals_per_cell):
+                                break
 
 
                             # 追加: すべてのペアと判定結果を保存
@@ -154,17 +209,30 @@ class CKYAnalyzer:
                                     },
                                     "text": text_A + text_B
                                 })
-                                if len(candidates) >= max_cell_total:
+                                if (max_cell_total is not None) and (len(candidates) >= max_cell_total):
                                     break
-                        if len(candidates) >= max_cell_total:
+                                if (search_target_per_cell is not None) and (len(candidates) >= search_target_per_cell):
+                                    break
+                        if (max_cell_total is not None) and (len(candidates) >= max_cell_total):
                             break
-                    if len(candidates) >= max_cell_total:
+                        if (search_target_per_cell is not None) and (len(candidates) >= search_target_per_cell):
+                            break
+                        if (max_pair_evals_per_cell is not None) and (pair_evals_in_cell >= max_pair_evals_per_cell):
+                            break
+                    if (max_cell_total is not None) and (len(candidates) >= max_cell_total):
+                        break
+                    if (search_target_per_cell is not None) and (len(candidates) >= search_target_per_cell):
+                        break
+                    if (max_pair_evals_per_cell is not None) and (pair_evals_in_cell >= max_pair_evals_per_cell):
                         break
                 # セルに候補・全判定結果を格納
                 if not isinstance(cky_table[i][j], dict):
                     cky_table[i][j] = {}
                 cky_table[i][j]["candidates"] = candidates
                 # cky_table[i][j]["all_results"] = all_results   # ← 追加
+                if candidates:
+                    self.last_stats["cells_with_candidates"] += 1
+                    self.last_stats["candidates_total"] += len(candidates)
         return cky_table
 
 

@@ -32,6 +32,7 @@ from glob import glob
 
 import multiprocessing as mp
 from multiprocessing.connection import Connection
+import queue
 
 import torch
 
@@ -68,7 +69,10 @@ PATTERN_JSONL = os.getenv(
 )
 INPUT_JSONL_DIR = os.getenv(
     "INPUT_JSONL_DIR",
-    os.path.join(REPO_ROOT, "data/T2KGB_JA/target_data"),
+    # Prefer a dedicated test directory if present, otherwise default to the main target_data.
+    (os.path.join(REPO_ROOT, "data/T2KGB_JA/test_target_data")
+     if os.path.isdir(os.path.join(REPO_ROOT, "data/T2KGB_JA/test_target_data"))
+     else os.path.join(REPO_ROOT, "data/T2KGB_JA/target_data")),
 )
 RESULTS_ROOT = os.getenv(
     "RESULTS_ROOT",
@@ -101,10 +105,23 @@ EXCLUDE_POS = ["助詞", "接続詞", "助動詞",
                "補助記号-句点", "補助記号-読点",
                "記号-句点", "記号-読点"]
 
-GPU_WORKERS            = 2
-GPU_TIMEOUT_SEC        = 4000000000
-CPU_WORKERS            = max(4, min(64, (os.cpu_count() or 8) - 2))
-CPU_TOTAL_TIMEOUT_SEC  = 1000000000
+# Defaults for stability in iterative/debug runs.
+# - Too many concurrent CPU workers can overload LLM-jp/vLLM and look like a "stall".
+# - Periodic traceback dumps help identify where a stuck worker is blocking.
+# Override any of these via environment variables.
+DEFAULT_CPU_WORKERS = 4
+DEFAULT_CPU_FAULTHANDLER_SEC = 60
+DEFAULT_GPU_TIMEOUT_SEC = 1800
+DEFAULT_GPU_FAULTHANDLER_SEC = 0
+
+# Number of concurrent GPU-stage processes. When only 1 GPU is visible
+# (e.g. CUDA_VISIBLE_DEVICES=0), setting this >1 is allowed but all workers
+# will be mapped onto the available device(s) safely.
+GPU_WORKERS            = max(1, int(os.getenv("GPU_WORKERS", "1")))
+GPU_TIMEOUT_SEC        = int(os.getenv("GPU_TIMEOUT_SEC", str(DEFAULT_GPU_TIMEOUT_SEC)))
+CPU_WORKERS            = int(os.getenv("CPU_WORKERS", str(DEFAULT_CPU_WORKERS)))
+# Per-sentence CPU worker timeout. Huge values can hide hangs indefinitely; keep a reasonable default.
+CPU_TOTAL_TIMEOUT_SEC  = int(os.getenv("CPU_TOTAL_TIMEOUT_SEC", "900"))
 
 LIT_MAX_FREQ            = 20
 CAND_SPAN_LIMIT_PER_AST = 1000
@@ -266,15 +283,36 @@ def derive_ontology_id_from_filename(path: str) -> str:
 
 def gpu_child_worker(row_payload, device_id: int, conn: Connection):
     try:
+        # Periodic traceback dumps for stuck GPU workers (opt-in via GPU_FAULTHANDLER_SEC).
+        # Default is off to avoid noisy logs; enable when diagnosing GPU-stage stalls.
+        try:
+            import faulthandler
+            sec = float(os.getenv("GPU_FAULTHANDLER_SEC", str(DEFAULT_GPU_FAULTHANDLER_SEC)) or 0.0)
+            if sec and sec > 0:
+                faulthandler.dump_traceback_later(sec, repeat=True)
+        except Exception:
+            pass
+
+        # NOTE: CUDA_VISIBLE_DEVICES can make only a subset of GPUs visible.
+        # If GPU_WORKERS > visible device count, naive set_device(device_id)
+        # can raise "invalid device ordinal" and silently drop most rows.
         if torch.cuda.is_available():
-            torch.cuda.set_device(device_id)
-            device = f"cuda:{device_id}"
+            ndev = 0
+            try:
+                ndev = int(torch.cuda.device_count() or 0)
+            except Exception:
+                ndev = 0
+            if ndev > 0:
+                mapped = int(device_id) % ndev
+                torch.cuda.set_device(mapped)
+                device = f"cuda:{mapped}"
+            else:
+                device = "cpu"
         else:
             device = "cpu"
 
         analyzer = CKYAnalyzer()
-        if device.startswith("cuda") and hasattr(analyzer, "model"):
-            analyzer.model.to(device)
+        # Individual detectors handle device placement internally (mask_module/dep_bert).
 
         cky_table = row_payload["cky_table"]
         t0 = time.time()
@@ -294,6 +332,7 @@ def gpu_child_worker(row_payload, device_id: int, conn: Connection):
             "clauses": row_payload["clauses"],
             "t_analyze": t_analyze,
             "payload_size": payload_size,
+            "cky_stats": getattr(analyzer, "last_stats", None),
         }
         conn.send(out)
     except Exception as e:
@@ -303,12 +342,104 @@ def gpu_child_worker(row_payload, device_id: int, conn: Connection):
             pass
     finally:
         try:
+            import faulthandler
+            faulthandler.cancel_dump_traceback_later()
+        except Exception:
+            pass
+        try:
             conn.close()
         except Exception:
             pass
 
+def gpu_worker_loop(worker_id: int, device_id: int, in_q: mp.Queue, out_q: mp.Queue) -> None:
+    """Persistent GPU-stage worker: load models once, then process many sentences.
+
+    This fixes the biggest slowdown in the previous design (spawn-per-sentence),
+    where mask-bert/dep-bert were loaded for every single sentence.
+    """
+    # NOTE: CUDA_VISIBLE_DEVICES can make only a subset of GPUs visible.
+    if torch.cuda.is_available():
+        try:
+            ndev = int(torch.cuda.device_count() or 0)
+        except Exception:
+            ndev = 0
+        if ndev > 0:
+            mapped = int(device_id) % ndev
+            torch.cuda.set_device(mapped)
+
+    analyzer = CKYAnalyzer()
+
+    while True:
+        task = in_q.get()
+        if task is None:
+            break
+        try:
+            cky_table = task["cky_table"]
+            t0 = time.time()
+            cky_dep = analyzer.analyze_cky_table(cky_table)
+            t_analyze = time.time() - t0
+            try:
+                payload_size = len(pickle.dumps(cky_dep, protocol=pickle.HIGHEST_PROTOCOL))
+            except Exception:
+                payload_size = -1
+            out_q.put({
+                "_worker_id": worker_id,
+                "id": task.get("id", ""),
+                "sentence": task.get("sent", ""),
+                "ontology_id": task.get("ontology_id", ""),
+                "cky_dep": cky_dep,
+                "clauses": task.get("clauses", []),
+                "t_analyze": t_analyze,
+                "payload_size": payload_size,
+                "cky_stats": getattr(analyzer, "last_stats", None),
+            })
+        except Exception as e:
+            out_q.put({
+                "_worker_id": worker_id,
+                "id": task.get("id", ""),
+                "_error": str(e),
+            })
+
 def cpu_child_worker(payload, ast_dict, conn: Connection):
     try:
+        # ---- diagnostics (optional) ----
+        # When CPU stage "stops", workers are often blocked inside matching or LLM calls.
+        # These lightweight logs help pinpoint where time is spent per sentence.
+        log_dir = payload.get("log_dir") or ""
+        run_start_ts = float(payload.get("run_start_ts") or 0.0)
+        sent_id_for_log = payload.get("id", "")
+
+        def _log_stage(stage: str, **extra) -> None:
+            if not log_dir:
+                return
+            try:
+                path = os.path.join(log_dir, "cpu_stage.jsonl")
+                ev = {
+                    "ts_sec": (time.time() - run_start_ts) if run_start_ts else None,
+                    "id": sent_id_for_log,
+                    "stage": stage,
+                }
+                if extra:
+                    ev.update(extra)
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
+
+        _log_stage("start")
+
+        # Periodic traceback dumps for stuck workers (opt-in via CPU_FAULTHANDLER_SEC).
+        try:
+            import faulthandler
+            sec = float(os.getenv("CPU_FAULTHANDLER_SEC", str(DEFAULT_CPU_FAULTHANDLER_SEC)) or 0.0)
+            if (sec and sec > 0) and log_dir and sent_id_for_log:
+                tb_path = os.path.join(log_dir, f"cpu_stall_{sent_id_for_log}.log")
+                f = open(tb_path, "a", encoding="utf-8")
+                faulthandler.enable(file=f)
+                faulthandler.dump_traceback_later(sec, repeat=True, file=f)
+        except Exception:
+            pass
+
         judge = ParallelJudgeLLMJP()
         ontology_resolver = get_ontology_resolver(
             RELATION_PROMPT_MAP_JSON, PROMPTS_JSON, ONTOLOGY_DIR
@@ -319,6 +450,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
         cky_dep  = payload["cky_dep"]; clauses = payload["clauses"]
         B = len(clauses)
 
+        _log_stage("prepare", bunsetsu_cnt=B, sentence_len=len(sentence or ""))
         candidate_asts = []
         for v in range(2, B+1):
             if v in ast_dict:
@@ -356,6 +488,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
         t0 = time.time()
         filtered = []
 
+        _log_stage("span_filter_start", cand_asts=len(candidate_asts))
         for entry in candidate_asts:
             var_count = entry.get("var_count", 0)
             literals  = entry.get("literal_list", [])
@@ -426,6 +559,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
 
         t_filter = time.time() - t0
 
+        _log_stage("span_filter_done", filtered_asts=len(filtered), t_filter_sec=round(t_filter, 6))
         t1 = time.time()
         seen = set()
         candidates = []
@@ -452,6 +586,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                     continue
                 yield a1, a2
 
+        _log_stage("matching_start")
         for entry in filtered:
             ast = entry["ast"]
             matcher = CKYMatcher(ast, verbose=False)
@@ -771,9 +906,12 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                 vis_rows.append(vis_row)
 
         t_match = time.time() - t1
+        _log_stage("matching_done", t_match_sec=round(t_match, 6), cand_rows=len(candidates), verified_rows=len(verified))
 
         out = {
             "id": sent_id,
+            "sentence": sentence,
+            "ontology_id": ontology_id,
             "candidates": candidates,
             "vis": vis_rows,
             "verified": verified,
@@ -783,6 +921,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
             "cand_asts": len(candidate_asts),
             "filtered_asts": len(filtered)
         }
+        _log_stage("done")
         conn.send(out)
     except Exception as e:
         try:
@@ -934,6 +1073,9 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
     gpu_timing_csv = os.path.join(log_dir, f"{prefix}_gpu_timing.csv")
     gpu_done_csv = os.path.join(log_dir, f"{prefix}_gpu_done.csv")
     gpu_timeout_csv = os.path.join(log_dir, f"{prefix}_gpu_timeout.csv")
+    gpu_error_jsonl = os.path.join(log_dir, f"{prefix}_gpu_errors.jsonl")
+    gpu_started_csv = os.path.join(log_dir, f"{prefix}_gpu_started.csv")
+    gpu_stats_jsonl = os.path.join(log_dir, f"{prefix}_gpu_stats.jsonl")
     cpu_timing_csv = os.path.join(log_dir, f"{prefix}_cpu_timing.csv")
     cpu_error_jsonl = os.path.join(log_dir, f"{prefix}_cpu_errors.jsonl")
     inflight_csv = os.path.join(log_dir, f"{prefix}_inflight.csv")
@@ -958,6 +1100,15 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
     if not os.path.exists(gpu_timeout_csv):
         with open(gpu_timeout_csv, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(["ts_sec","id"])
+    if not os.path.exists(gpu_error_jsonl):
+        with open(gpu_error_jsonl, "w", encoding="utf-8") as _:
+            pass
+    if not os.path.exists(gpu_started_csv):
+        with open(gpu_started_csv, "w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(["ts_sec","id","bunsetsu_cnt","cells","sentence_len"])
+    if not os.path.exists(gpu_stats_jsonl):
+        with open(gpu_stats_jsonl, "w", encoding="utf-8") as _:
+            pass
     if not os.path.exists(cpu_timing_csv):
         with open(cpu_timing_csv, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(["id","t_filter_sec","t_match_sec","cand_asts","filtered_asts","timeout"])
@@ -995,7 +1146,30 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
     except ValueError:
         ctx_cpu = mp.get_context("spawn")
 
-    gpu_slots = []
+    # ----------------------------
+    # GPU stage: persistent workers
+    # ----------------------------
+    # Previous design (1 sentence = 1 spawned process) re-loaded mask-bert/dep-bert for every sentence,
+    # making the GPU stage extremely slow and prone to appearing "stuck".
+    # We keep a small number of persistent GPU workers and feed them tasks.
+    gpu_out_q: mp.Queue = ctx_gpu.Queue()
+    gpu_workers: list[dict] = []
+    for wid in range(GPU_WORKERS):
+        inq = ctx_gpu.Queue(maxsize=1)
+        p = ctx_gpu.Process(target=gpu_worker_loop, args=(wid, wid, inq, gpu_out_q), daemon=True)
+        p.start()
+        gpu_workers.append({
+            "wid": wid,
+            "proc": p,
+            "inq": inq,
+            "busy": False,
+            "start": 0.0,
+            "row_id": "",
+            "row_payload": None,
+            "retries": 0,
+        })
+    GPU_MAX_RETRIES_PER_ROW = 1
+
     cpu_slots = []
     gpu_idx = 0
     done_gpu = 0
@@ -1026,72 +1200,167 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
                                            done_gpu, done_cpu, submitted_gpu, submitted_cpu])
             last_inflight_log = now
 
-    while (done_gpu < total_gpu) or gpu_slots or cpu_queue or cpu_slots:
-        while len(gpu_slots) < GPU_WORKERS and gpu_idx < total_gpu:
+    def _any_gpu_busy() -> bool:
+        return any(w.get("busy") for w in gpu_workers)
+
+    while (done_gpu < total_gpu) or _any_gpu_busy() or cpu_queue or cpu_slots:
+        # Submit tasks to idle GPU workers.
+        for w in gpu_workers:
+            if gpu_idx >= total_gpu:
+                break
+            if w["busy"]:
+                continue
             row = rows[gpu_idx]
-            parent_conn, child_conn = ctx_gpu.Pipe(duplex=False)
-            dev_id = len(gpu_slots) % GPU_WORKERS
-            p = ctx_gpu.Process(target=gpu_child_worker, args=(row, dev_id, child_conn), daemon=True)
-            p.start()
+            row_payload = dict(row)
+            row_payload["log_dir"] = log_dir
+            row_payload["run_start_ts"] = start_ts
+
+            try:
+                B = len(row.get("clauses", []) or [])
+                cells = B * (B - 1) // 2
+                with open(gpu_started_csv, "a", newline="", encoding="utf-8") as fgs:
+                    csv.writer(fgs).writerow([f'{time.time()-start_ts:.3f}', row.get("id",""), B, cells, len(row.get("sent","") or "")])
+            except Exception:
+                pass
+
+            w["inq"].put(row_payload)
+            w["busy"] = True
+            w["start"] = time.time()
+            w["row_id"] = row.get("id", "")
+            w["row_payload"] = row_payload
+            w["retries"] = 0
             submitted_gpu += 1
-            gpu_slots.append({
-                "proc": p,
-                "conn": parent_conn,
-                "start": time.time(),
-                "device_id": dev_id,
-                "row_id": row["id"],
-            })
             gpu_idx += 1
 
-        still_gpu = []
-        for slot in gpu_slots:
-            p: mp.Process = slot["proc"]
-            conn: Connection = slot["conn"]
-            row_id = slot["row_id"]
-            started = slot["start"]
+        # Collect completed GPU results.
+        while True:
+            try:
+                payload = gpu_out_q.get_nowait()
+            except queue.Empty:
+                break
 
-            if not p.is_alive():
-                payload = None
+            wid = int(payload.get("_worker_id", -1))
+            w = gpu_workers[wid] if (0 <= wid < len(gpu_workers)) else None
+            row_id = payload.get("id") or (w.get("row_id") if w else "")
+
+            if w:
+                w["busy"] = False
+                w["row_id"] = ""
+                w["row_payload"] = None
+                w["retries"] = 0
+
+            with open(gpu_done_csv, "a", newline="", encoding="utf-8") as fgd:
+                csv.writer(fgd).writerow([f'{time.time()-start_ts:.3f}', row_id])
+
+            if payload and "_error" in payload:
                 try:
-                    if conn.poll():
-                        payload = conn.recv()
-                except EOFError:
-                    payload = None
-                finally:
-                    try: conn.close()
-                    except Exception: pass
-                    p.join(timeout=0.1)
+                    with open(gpu_error_jsonl, "a", encoding="utf-8") as ferr:
+                        ferr.write(json.dumps({
+                            "ts_sec": time.time() - start_ts,
+                            "id": row_id,
+                            "error": payload.get("_error", ""),
+                        }, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass
+                done_gpu += 1
+                gpu_pbar.update(1)
+                continue
 
-                with open(gpu_done_csv, "a", newline="", encoding="utf-8") as fgd:
-                    csv.writer(fgd).writerow([f'{time.time()-start_ts:.3f}', row_id])
+            if payload:
+                with open(gpu_timing_csv, "a", newline="", encoding="utf-8") as fgpu:
+                    csv.writer(fgpu).writerow([payload.get("id",""),
+                                               f'{payload.get("t_analyze", 0.0):.6f}',
+                                               payload.get("payload_size", -1)])
+                try:
+                    with open(gpu_stats_jsonl, "a", encoding="utf-8") as fgs:
+                        fgs.write(json.dumps({
+                            "ts_sec": time.time() - start_ts,
+                            "id": payload.get("id", row_id),
+                            "t_analyze_sec": payload.get("t_analyze", 0.0),
+                            "stats": payload.get("cky_stats"),
+                        }, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass
 
-                if payload and "_error" in payload:
-                    done_gpu += 1
-                    gpu_pbar.update(1)
-                elif payload:
-                    with open(gpu_timing_csv, "a", newline="", encoding="utf-8") as fgpu:
-                        csv.writer(fgpu).writerow([payload["id"],
-                                                   f'{payload.get("t_analyze", 0.0):.6f}',
-                                                   payload.get("payload_size", -1)])
-                    cpu_queue.append(payload)
-                    done_gpu += 1
-                    gpu_pbar.update(1)
-                else:
-                    done_gpu += 1
-                    gpu_pbar.update(1)
-            else:
-                if time.time() - started > GPU_TIMEOUT_SEC:
-                    try: p.terminate()
-                    except Exception: pass
-                    try: p.join(timeout=0.5)
-                    except Exception: pass
+                payload["log_dir"] = log_dir
+                payload["run_start_ts"] = start_ts
+                cpu_queue.append(payload)
+
+            done_gpu += 1
+            gpu_pbar.update(1)
+
+        # GPU worker timeouts / crashed workers.
+        for w in gpu_workers:
+            if not w["busy"]:
+                # Restart if crashed unexpectedly.
+                if not w["proc"].is_alive():
+                    try:
+                        w["proc"].join(timeout=0.1)
+                    except Exception:
+                        pass
+                    inq = ctx_gpu.Queue(maxsize=1)
+                    p = ctx_gpu.Process(target=gpu_worker_loop, args=(w["wid"], w["wid"], inq, gpu_out_q), daemon=True)
+                    p.start()
+                    w["inq"] = inq
+                    w["proc"] = p
+                continue
+
+            if not w["proc"].is_alive():
+                # Busy but dead: treat as error and continue.
+                row_id = w.get("row_id", "")
+                try:
+                    with open(gpu_error_jsonl, "a", encoding="utf-8") as ferr:
+                        ferr.write(json.dumps({
+                            "ts_sec": time.time() - start_ts,
+                            "id": row_id,
+                            "error": "gpu_worker_died",
+                        }, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass
+                w["busy"] = False
+                w["row_id"] = ""
+                w["row_payload"] = None
+                done_gpu += 1
+                gpu_pbar.update(1)
+                continue
+
+            if (time.time() - w["start"]) > GPU_TIMEOUT_SEC:
+                row_id = w.get("row_id", "")
+                try:
+                    w["proc"].terminate()
+                except Exception:
+                    pass
+                try:
+                    w["proc"].join(timeout=0.5)
+                except Exception:
+                    pass
+
+                try:
                     with open(gpu_timeout_csv, "a", newline="", encoding="utf-8") as fgt:
                         csv.writer(fgt).writerow([f'{time.time()-start_ts:.3f}', row_id])
+                except Exception:
+                    pass
+
+                # Restart the worker process (models are reloaded in the new process).
+                inq = ctx_gpu.Queue(maxsize=1)
+                p = ctx_gpu.Process(target=gpu_worker_loop, args=(w["wid"], w["wid"], inq, gpu_out_q), daemon=True)
+                p.start()
+                w["inq"] = inq
+                w["proc"] = p
+
+                # Retry once on a fresh process; otherwise mark as done (timeout).
+                retry_payload = w.get("row_payload")
+                if (retry_payload is not None) and (w.get("retries", 0) < GPU_MAX_RETRIES_PER_ROW):
+                    w["retries"] = w.get("retries", 0) + 1
+                    w["start"] = time.time()
+                    w["inq"].put(retry_payload)
+                else:
+                    w["busy"] = False
+                    w["row_id"] = ""
+                    w["row_payload"] = None
+                    w["retries"] = 0
                     done_gpu += 1
                     gpu_pbar.update(1)
-                else:
-                    still_gpu.append(slot)
-        gpu_slots = still_gpu
 
         while len(cpu_slots) < CPU_WORKERS and cpu_queue:
             payload = cpu_queue.pop(0)
@@ -1117,8 +1386,11 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
             if not p.is_alive():
                 out = None
                 try:
-                    if conn.poll():
-                        out = conn.recv()
+                    for _ in range(3):
+                        if conn.poll(0.05):
+                            out = conn.recv()
+                            break
+                        time.sleep(0.005)
                 except EOFError:
                     out = None
                 finally:
@@ -1208,6 +1480,23 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
 
         log_inflight()
         time.sleep(0.01)
+
+    # Stop GPU workers
+    for w in gpu_workers:
+        try:
+            w["inq"].put(None)
+        except Exception:
+            pass
+    for w in gpu_workers:
+        try:
+            w["proc"].join(timeout=1.0)
+        except Exception:
+            pass
+        if w["proc"].is_alive():
+            try:
+                w["proc"].terminate()
+            except Exception:
+                pass
 
     gpu_pbar.close()
     cpu_pbar.close()
