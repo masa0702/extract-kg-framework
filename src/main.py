@@ -921,6 +921,15 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
             vis_csv, index=False, encoding="utf-8-sig"
         )
 
+    def _append_csv_rows(path: str, cols: list[str], rows: list[dict]) -> None:
+        if not rows:
+            return
+        # IMPORTANT: Append with utf-8 (no BOM). The header file is created with utf-8-sig once.
+        with open(path, "a", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
+            for r in rows:
+                w.writerow({c: r.get(c, "") for c in cols})
+
     sent_stats_csv = os.path.join(log_dir, f"{prefix}_sentence_stats.csv")
     gpu_timing_csv = os.path.join(log_dir, f"{prefix}_gpu_timing.csv")
     gpu_done_csv = os.path.join(log_dir, f"{prefix}_gpu_done.csv")
@@ -1141,19 +1150,13 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
                         ])
                     candidate_rows = out.get("candidates", [])
                     if candidate_rows:
-                        pd.DataFrame(candidate_rows).to_csv(
-                            candidate_csv, mode="a", header=False, index=False, encoding="utf-8-sig"
-                        )
+                        _append_csv_rows(candidate_csv, triple_cols, candidate_rows)
                     vis_rows = out.get("vis", [])
                     if vis_rows:
-                        pd.DataFrame(vis_rows).to_csv(
-                            vis_csv, mode="a", header=False, index=False, encoding="utf-8-sig"
-                        )
+                        _append_csv_rows(vis_csv, vis_cols, vis_rows)
                     verified_rows = out.get("verified", [])
                     if verified_rows:
-                        pd.DataFrame(verified_rows).to_csv(
-                            verified_csv, mode="a", header=False, index=False, encoding="utf-8-sig"
-                        )
+                        _append_csv_rows(verified_csv, triple_cols, verified_rows)
                     # JSONL export of verified triples (subject=domain_arg, object=range_arg).
                     # One line per processed sentence/id for downstream evaluation.
                     triples = []

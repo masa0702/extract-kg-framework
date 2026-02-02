@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 import spacy, ginza, yaml, pathlib
 import time
 import logging
+from functools import lru_cache
 
 # ----------------- 設定読み込み -----------------
 HERE = pathlib.Path(__file__).resolve().parent
@@ -36,18 +37,20 @@ def load_spacy_model(name, timeout=60):
         raise TimeoutError(f"spaCyモデル「{name}」の読み込みがタイムアウトしました。")
     return nlp
 
-try:
-    nlp = load_spacy_model("ja_ginza_bert_large", timeout=60)
-except Exception as e:
-    logging.warning(f"BERT GiNZAの読み込みに失敗したので、通常GiNZAで再試行します。: {e}")
+@lru_cache(maxsize=1)
+def get_nlp():
+    """
+    spaCy/GiNZA モデルを遅延ロードして使い回す。
+    multiprocessing(spawn) 環境では import 時ロードが子プロセスごとに走って重くなるため、
+    必要になったタイミングでのみロードする。
+    """
     try:
+        nlp = load_spacy_model("ja_ginza_bert_large", timeout=60)
+    except Exception as e:
+        logging.warning(f"BERT GiNZAの読み込みに失敗したので、通常GiNZAで再試行します。: {e}")
         nlp = load_spacy_model("ja_ginza", timeout=30)
-    except Exception as e2:
-        logging.error(f"通常GiNZAの読み込みにも失敗しました: {e2}")
-        raise
-
-# 読み込み成功後
-logging.info(f"使用中のspaCyモデル: {nlp.meta['name']}")
+    logging.info(f"使用中のspaCyモデル: {nlp.meta['name']}")
+    return nlp
 
 
 # ------------- 辞書読み込み -----------------
@@ -295,7 +298,7 @@ def _merge_consecutive_english_spans(spans):
 class BunsetsuSegmenter:
     @staticmethod
     def segment(sentence: str) -> List[List[Any]]:
-        doc = nlp(sentence)
+        doc = get_nlp()(sentence)
         return BunsetsuSegmenter._segment_doc(doc)
 
     @staticmethod
@@ -340,7 +343,7 @@ class BunsetsuSegmenter:
         -------
         Dict[str, List[List[Any]]]
         """
-        docs = nlp.pipe(sentences)
+        docs = get_nlp().pipe(sentences)
         return {
             sent: cls._segment_doc(doc)  # type: ignore[arg-type]
             for sent, doc in zip(sentences, docs)
@@ -356,7 +359,7 @@ class DependencyAnalysis:
         文節は BunsetsuSegmenter.segment() で取得し、
         文字位置は 1 始まり・終端包含に正規化する。
         """
-        docs = nlp.pipe(sentences)
+        docs = get_nlp().pipe(sentences)
         results: dict[str, dict] = {}
         segmenter = BunsetsuSegmenter()
 
