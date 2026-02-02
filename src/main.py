@@ -129,6 +129,29 @@ def extract_parallel_variables(ast):
     visit(ast)
     return [f"{v.symbol}{v.index}" for v in vars_]
 
+def extract_parallel_variable_groups(ast):
+    """Return list of variable-name groups for each ParallelNode (e.g. [['X1','X2'], ['Y1','Y2']])."""
+    groups = []
+    def visit(node):
+        if isinstance(node, ParallelNode) and hasattr(node, "options"):
+            g = []
+            for opt in node.options or []:
+                if isinstance(opt, VariableNode):
+                    g.append(f"{opt.symbol}{opt.index}")
+            if len(g) >= 2:
+                groups.append(g)
+        for attr in ("elements", "options", "block"):
+            if hasattr(node, attr):
+                child = getattr(node, attr)
+                if child:
+                    if isinstance(child, list):
+                        for c in child:
+                            visit(c)
+                    else:
+                        visit(child)
+    visit(ast)
+    return groups
+
 def extract_relation_candidates_from_sentence(
     sentence: str,
     ontology_id: str,
@@ -411,9 +434,26 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
         seen_triples = set()
         prompt_logs = []
 
+        def _is_parallel_pair(a: str, b: str, parallel_value_groups: list[list[str]]) -> bool:
+            if not a or not b:
+                return False
+            for g in parallel_value_groups:
+                s = set(g)
+                if a in s and b in s:
+                    return True
+            return False
+
+        def _iter_allowed_pairs(x_values: list[str], parallel_value_groups: list[list[str]]):
+            # Use unordered pairs; skip pairs that are within the same verified-parallel group.
+            for a1, a2 in combinations(x_values, 2):
+                if _is_parallel_pair(a1, a2, parallel_value_groups):
+                    continue
+                yield a1, a2
+
         for entry in filtered:
             ast = entry["ast"]
             matcher = CKYMatcher(ast, verbose=False)
+            par_var_groups = extract_parallel_variable_groups(ast)
 
             for r in matcher.match_table(cky_dep, spans=entry.get("cand_spans")):
                 key = frozenset(r.variable_mapping.items())
@@ -424,11 +464,24 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                 varmap_raw   = dict(r.variable_mapping)
                 varmap_clean = clean_variable_mapping(varmap_raw, clauses)
 
+                # For logging/debug (not used for filtering).
                 par_names = extract_parallel_variables(ast)
                 par_elems = [varmap_clean[name] for name in par_names if name in varmap_clean]
-                if par_elems:
-                    is_parallel = judge.judge_parallel(sentence, par_elems)
-                    if is_parallel is False:
+
+                # Parallel validation per ParallelNode group (avoid mixing independent groups).
+                parallel_value_groups: list[list[str]] = []
+                if par_var_groups:
+                    ok_parallel = True
+                    for g in par_var_groups:
+                        vals = [varmap_clean.get(name, "") for name in g]
+                        vals = [v for v in vals if v]
+                        if len(vals) < 2:
+                            continue
+                        if judge.judge_parallel(sentence, vals) is False:
+                            ok_parallel = False
+                            break
+                        parallel_value_groups.append(vals)
+                    if not ok_parallel:
                         continue
 
                 Xs = []; Ys = []
@@ -502,7 +555,8 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                             continue
                         if not domain_concept or not range_concept:
                             continue
-                        for arg1, arg2 in combinations(x_values, 2):
+
+                        for arg1, arg2 in _iter_allowed_pairs(x_values, parallel_value_groups):
                             prompt_text = render_prompt(
                                 prompt,
                                 {
@@ -527,6 +581,11 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                 "verdict": verdict,
                                 "prompt_text": prompt_text,
                             })
+
+                            # prompt_id=10 is a synonym/normalization gate (not a domain/range verifier).
+                            if prompt_id == "10":
+                                continue
+
                             if verdict == 0:
                                 continue
 
@@ -538,6 +597,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                 else:
                                     continue
                             else:
+                                # Unknown pair-prompt: accept only in the given order.
                                 domain_arg, range_arg = arg1, arg2
 
                             key = (sent_id, rel, domain_arg, range_arg, prompt_id)
@@ -561,99 +621,95 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                 "stage": "verified",
                             })
                     else:
-                        for arg in x_values:
-                            other_arg = pick_other_argument(x_values, arg)
+                        # Binary side-based verifier (01/15/17/21):
+                        # Decide a (domain, range) pair; do not accept single-sided matches.
+                        if len(x_values) < 2:
+                            continue
+                        if not domain_concept or not range_concept:
+                            continue
 
-                            verdict_domain = 0
-                            verdict_range = 0
-
-                            if domain_concept:
-                                prompt_text = render_prompt(
-                                    prompt,
-                                    {
-                                        "relation_ja": rel,
-                                        "side": "domain",
-                                        "concept_ja": domain_concept,
-                                        "argument": arg,
-                                        "other_argument": other_arg,
-                                        "context_sentence": sentence,
-                                    },
-                                )
-                                verdict_domain = ontology_judge.judge_prompt(prompt_text)
-                                prompt_logs.append({
-                                    "id": sent_id,
+                        def _judge_side(side: str, concept: str, argument: str, other_argument: str) -> int:
+                            prompt_text = render_prompt(
+                                prompt,
+                                {
                                     "relation_ja": rel,
-                                    "ontology_id": ontology_id,
-                                    "prompt_id": prompt_id,
-                                    "prompt_name": prompt_name,
-                                    "mode": "domain",
-                                    "argument": arg,
-                                    "other_argument": other_arg,
-                                    "verdict": verdict_domain,
-                                    "prompt_text": prompt_text,
-                                })
-
-                            if range_concept:
-                                prompt_text = render_prompt(
-                                    prompt,
-                                    {
-                                        "relation_ja": rel,
-                                        "side": "range",
-                                        "concept_ja": range_concept,
-                                        "argument": arg,
-                                        "other_argument": other_arg,
-                                        "context_sentence": sentence,
-                                    },
-                                )
-                                verdict_range = ontology_judge.judge_prompt(prompt_text)
-                                prompt_logs.append({
-                                    "id": sent_id,
-                                    "relation_ja": rel,
-                                    "ontology_id": ontology_id,
-                                    "prompt_id": prompt_id,
-                                    "prompt_name": prompt_name,
-                                    "mode": "range",
-                                    "argument": arg,
-                                    "other_argument": other_arg,
-                                    "verdict": verdict_range,
-                                    "prompt_text": prompt_text,
-                                })
-
-                            if verdict_domain and not verdict_range:
-                                domain_arg, range_arg = arg, ""
-                                verdict = verdict_domain
-                            elif verdict_range and not verdict_domain:
-                                domain_arg, range_arg = "", arg
-                                verdict = verdict_range
-                            elif verdict_domain and verdict_range:
-                                if domain_concept == range_concept:
-                                    domain_arg, range_arg = arg, arg
-                                    verdict = max(verdict_domain, verdict_range)
-                                else:
-                                    continue
-                            else:
-                                continue
-
-                            key = (sent_id, rel, domain_arg, range_arg, prompt_id)
-                            if key in seen_triples:
-                                continue
-                            seen_triples.add(key)
-                            verified.append({
+                                    "side": side,
+                                    "concept_ja": concept,
+                                    "argument": argument,
+                                    "other_argument": other_argument or "NULL",
+                                    "context_sentence": sentence,
+                                },
+                            )
+                            v = ontology_judge.judge_prompt(prompt_text)
+                            prompt_logs.append({
                                 "id": sent_id,
-                                "sentence": sentence,
-                                "ontology_id": ontology_id,
                                 "relation_ja": rel,
-                                "pid": pid,
+                                "ontology_id": ontology_id,
                                 "prompt_id": prompt_id,
                                 "prompt_name": prompt_name,
-                                "domain_arg": domain_arg,
-                                "range_arg": range_arg,
-                                "domain_concept_ja": domain_concept,
-                                "range_concept_ja": range_concept,
-                                "verdict": verdict,
-                                "ast_uid": ast_uid,
-                                "stage": "verified",
+                                "mode": side,
+                                "argument": argument,
+                                "other_argument": other_argument or "NULL",
+                                "verdict": v,
+                                "prompt_text": prompt_text,
                             })
+                            return v
+
+                        for a, b in _iter_allowed_pairs(x_values, parallel_value_groups):
+                            # Try (domain=a, range=b)
+                            vd = _judge_side("domain", domain_concept, a, b)
+                            if vd == 1:
+                                vr = _judge_side("range", range_concept, b, a)
+                                if vr == 1:
+                                    domain_arg, range_arg = a, b
+                                    verdict = 1
+                                    key = (sent_id, rel, domain_arg, range_arg, prompt_id)
+                                    if key not in seen_triples:
+                                        seen_triples.add(key)
+                                        verified.append({
+                                            "id": sent_id,
+                                            "sentence": sentence,
+                                            "ontology_id": ontology_id,
+                                            "relation_ja": rel,
+                                            "pid": pid,
+                                            "prompt_id": prompt_id,
+                                            "prompt_name": prompt_name,
+                                            "domain_arg": domain_arg,
+                                            "range_arg": range_arg,
+                                            "domain_concept_ja": domain_concept,
+                                            "range_concept_ja": range_concept,
+                                            "verdict": verdict,
+                                            "ast_uid": ast_uid,
+                                            "stage": "verified",
+                                        })
+                                    continue
+
+                            # Try swapped (domain=b, range=a)
+                            vd = _judge_side("domain", domain_concept, b, a)
+                            if vd == 1:
+                                vr = _judge_side("range", range_concept, a, b)
+                                if vr == 1:
+                                    domain_arg, range_arg = b, a
+                                    verdict = 1
+                                    key = (sent_id, rel, domain_arg, range_arg, prompt_id)
+                                    if key not in seen_triples:
+                                        seen_triples.add(key)
+                                        verified.append({
+                                            "id": sent_id,
+                                            "sentence": sentence,
+                                            "ontology_id": ontology_id,
+                                            "relation_ja": rel,
+                                            "pid": pid,
+                                            "prompt_id": prompt_id,
+                                            "prompt_name": prompt_name,
+                                            "domain_arg": domain_arg,
+                                            "range_arg": range_arg,
+                                            "domain_concept_ja": domain_concept,
+                                            "range_concept_ja": range_concept,
+                                            "verdict": verdict,
+                                            "ast_uid": ast_uid,
+                                            "stage": "verified",
+                                        })
 
                 vis_row = {
                     "id": sent_id,
@@ -831,10 +887,15 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
     gpu_done_csv = os.path.join(log_dir, f"{prefix}_gpu_done.csv")
     gpu_timeout_csv = os.path.join(log_dir, f"{prefix}_gpu_timeout.csv")
     cpu_timing_csv = os.path.join(log_dir, f"{prefix}_cpu_timing.csv")
+    cpu_error_jsonl = os.path.join(log_dir, f"{prefix}_cpu_errors.jsonl")
     inflight_csv = os.path.join(log_dir, f"{prefix}_inflight.csv")
     prompt_log_path = os.path.join(output_dir, f"{prefix}_prompt_log.jsonl")
     if not os.path.exists(prompt_log_path):
         with open(prompt_log_path, "w", encoding="utf-8") as _:
+            pass
+    extracted_jsonl_path = os.path.join(output_dir, f"{prefix}_extracted_triples.jsonl")
+    if not os.path.exists(extracted_jsonl_path):
+        with open(extracted_jsonl_path, "w", encoding="utf-8") as _:
             pass
 
     if not os.path.exists(sent_stats_csv):
@@ -852,6 +913,9 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
     if not os.path.exists(cpu_timing_csv):
         with open(cpu_timing_csv, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(["id","t_filter_sec","t_match_sec","cand_asts","filtered_asts","timeout"])
+    if not os.path.exists(cpu_error_jsonl):
+        with open(cpu_error_jsonl, "w", encoding="utf-8") as _:
+            pass
     if not os.path.exists(inflight_csv):
         with open(inflight_csv, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(["ts_sec","inflight_gpu","inflight_cpu","done_gpu","done_cpu","submitted_gpu","submitted_cpu"])
@@ -1015,6 +1079,15 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
                     p.join(timeout=0.1)
 
                 if out and "_error" in out:
+                    try:
+                        with open(cpu_error_jsonl, "a", encoding="utf-8") as ferr:
+                            ferr.write(json.dumps({
+                                "ts_sec": time.time() - start_ts,
+                                "id": out.get("id", row_id),
+                                "error": out.get("_error", ""),
+                            }, ensure_ascii=False) + "\n")
+                    except Exception:
+                        pass
                     with open(cpu_timing_csv, "a", newline="", encoding="utf-8") as fcpu:
                         csv.writer(fcpu).writerow([row_id, "0.000000", "0.000000", 0, 0, "error"])
                 elif out:
@@ -1042,6 +1115,30 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
                         pd.DataFrame(verified_rows).to_csv(
                             verified_csv, mode="a", header=False, index=False, encoding="utf-8-sig"
                         )
+                    # JSONL export of verified triples (subject=domain_arg, object=range_arg).
+                    # One line per processed sentence/id for downstream evaluation.
+                    triples = []
+                    seen_tr = set()
+                    for r in (verified_rows or []):
+                        sub = (r.get("domain_arg") or "").strip()
+                        rel = (r.get("relation_ja") or "").strip()
+                        obj = (r.get("range_arg") or "").strip()
+                        if not sub or not rel or not obj:
+                            continue
+                        key = (sub, rel, obj)
+                        if key in seen_tr:
+                            continue
+                        seen_tr.add(key)
+                        triples.append({"sub": sub, "rel": rel, "obj": obj})
+                    try:
+                        with open(extracted_jsonl_path, "a", encoding="utf-8") as fex:
+                            fex.write(json.dumps({
+                                "id": out.get("id", ""),
+                                "sent_ja": out.get("sentence", ""),
+                                "extracted_triples": triples,
+                            }, ensure_ascii=False) + "\n")
+                    except Exception:
+                        pass
                     prompt_rows = out.get("prompt_logs", [])
                     if prompt_rows:
                         with open(prompt_log_path, "a", encoding="utf-8") as fpl:
