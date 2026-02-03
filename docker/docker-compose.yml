@@ -161,7 +161,8 @@ services:
       - --model
       - llm-jp/llm-jp-3.1-13b-instruct4
       - --served-model-name
-      - llm-jp-ont2
+      # NOTE: Must match LLMJP_ONTO_MODEL (docker/.env) so the client can round-robin safely.
+      - llmjp-13b-onto
       - --dtype
       - half
       - --max-model-len
