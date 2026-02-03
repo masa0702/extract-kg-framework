@@ -55,6 +55,7 @@ from modules_core.ontology_verify import (
     prompt_requires_pair,
     pick_other_argument,
     normalize_text,
+    load_ontology_relation_aliases,
 )
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -126,6 +127,65 @@ CPU_TOTAL_TIMEOUT_SEC  = int(os.getenv("CPU_TOTAL_TIMEOUT_SEC", "900"))
 LIT_MAX_FREQ            = 20
 CAND_SPAN_LIMIT_PER_AST = 1000
 
+def _env_flag(name: str, default: str = "0") -> bool:
+    return str(os.getenv(name, default)).strip().lower() in ("1", "true", "yes", "on")
+
+def preflight_ontology_llm() -> None:
+    """
+    オントロジー検証用 vLLM への到達性と、期待モデルの存在を 1 回だけ確認する。
+    失敗時は原因を明示して停止（fail-fast）させる。
+    """
+    if not _env_flag("ONTOLOGY_VERIFY_PREFLIGHT", "1"):
+        return
+    # Import here to avoid import cycles in non-LLM usage.
+    from llm.llmjp_client import get_llmjp_http_for
+
+    client = get_llmjp_http_for("onto")
+    expected = getattr(client, "model", None) or os.getenv("LLMJP_ONTO_MODEL") or os.getenv("LLMJP_MODEL") or "llmjp-13b"
+    urls = list(getattr(client, "base_urls", None) or [])
+    if not urls:
+        urls = [str(getattr(client, "last_base_url", "") or "").strip()] if getattr(client, "last_base_url", None) else []
+    urls = [u for u in urls if u]
+    try:
+        if not urls:
+            raise RuntimeError("LLMJP_ONTO_BASE_URL(S) が空です")
+
+        # Verify every onto base_url in the pool; otherwise a broken/mismatched server can slip through.
+        for base in urls:
+            data = client.list_models() if (len(urls) == 1) else None
+            if data is None:
+                # Force-request /models against this specific base_url (no round-robin).
+                # We intentionally use the same Session/headers so this behaves like normal calls.
+                url = f"{base.rstrip('/')}/models"
+                client.last_base_url = base.rstrip("/")
+                client.last_url = url
+                r = client._session.get(url, headers=client._headers, timeout=client.timeout_sec)  # type: ignore[attr-defined]
+                if r.status_code in (408, 409, 429, 500, 502, 503, 504):
+                    raise RuntimeError(f"HTTP {r.status_code}: {r.text}")
+                r.raise_for_status()
+                data = r.json()
+
+            ids = set()
+            for row in (data or {}).get("data", []) or []:
+                mid = (row or {}).get("id")
+                if mid:
+                    ids.add(str(mid))
+            if expected and ids and (expected not in ids):
+                preview = sorted(ids)
+                if len(preview) > 30:
+                    preview = preview[:30] + ["...(truncated)"]
+                raise RuntimeError(
+                    "onto vLLM のモデル名が不整合です: "
+                    f"expected={expected!r} url={base!r} available={preview!r}"
+                )
+
+        print(f"[preflight] ontology vLLM ok: model={expected!r} urls={urls!r}")
+    except Exception as e:
+        raise RuntimeError(
+            "onto vLLM の preflight に失敗しました。"
+            f" expected_model={expected!r} urls={urls!r} error={type(e).__name__}: {e}"
+        ) from e
+
 def extract_parallel_variables(ast):
     vars_ = []
     def visit(node):
@@ -178,6 +238,10 @@ def extract_relation_candidates_from_sentence(
         return []
     ont = normalize_text(ontology_id)
     rows = getattr(resolver, "_rows", [])
+    alias_pid = load_ontology_relation_aliases(ONTOLOGY_DIR, ont) if ont else {}
+    pid_to_aliases = {}
+    for a, pid in (alias_pid or {}).items():
+        pid_to_aliases.setdefault(pid, []).append(a)
     out = []
     for row in rows:
         if ont and normalize_text(row.get("ontology_id")) != ont:
@@ -185,6 +249,13 @@ def extract_relation_candidates_from_sentence(
         pred = normalize_text(row.get("predicate_ja"))
         if pred and pred in sentence:
             out.append(pred)
+            continue
+        pid = normalize_text(row.get("pid"))
+        if pid:
+            for a in pid_to_aliases.get(pid, []):
+                if a and (a in sentence):
+                    out.append(a)
+                    break
     # preserve order of appearance in sentence
     uniq = []
     seen = set()
@@ -569,6 +640,9 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
         prompt_logs = []
         seen_prompt_calls = set()
         log_dup_skips = str(os.getenv("LOG_DUPLICATE_SKIPS", "")).lower() in ("1", "true", "yes")
+        # Per-sentence cache: raw relation string -> resolved row / canonical label
+        rel_row_cache: dict[str, dict] = {}
+        rel_label_cache: dict[str, str] = {}
 
         def _is_parallel_pair(a: str, b: str, parallel_value_groups: list[list[str]]) -> bool:
             if not a or not b:
@@ -589,8 +663,10 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
         _log_stage("matching_start")
         for entry in filtered:
             ast = entry["ast"]
-            matcher = CKYMatcher(ast, verbose=False)
-            par_var_groups = extract_parallel_variable_groups(ast)
+            matcher = entry.get("matcher") or CKYMatcher(ast, verbose=False)
+            par_var_groups = entry.get("parallel_var_groups")
+            if par_var_groups is None:
+                par_var_groups = extract_parallel_variable_groups(ast)
 
             for r in matcher.match_table(cky_dep, spans=entry.get("cand_spans")):
                 key = frozenset(r.variable_mapping.items())
@@ -632,11 +708,24 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
 
                 ast_uid  = entry.get("ast_uid", get_ast_uid(ast))
                 for _, ((xk, xv), (yk, yv)) in enumerate(product(Xs, Ys)):
+                    rel_out = yv
+                    if yv in rel_label_cache:
+                        rel_out = rel_label_cache[yv]
+                    else:
+                        row = ontology_resolver.resolve_relation_row(yv, ontology_id)
+                        if row:
+                            rel_row_cache[yv] = row
+                            rel_out = (
+                                ontology_resolver.canonical_relation_label(row, ontology_id)
+                                or normalize_text(row.get("predicate_ja"))
+                                or yv
+                            )
+                        rel_label_cache[yv] = rel_out
                     candidates.append({
                         "id": sent_id,
                         "sentence": sentence,
                         "ontology_id": ontology_id,
-                        "relation_ja": yv,
+                        "relation_ja": rel_out,
                         "pid": "",
                         "prompt_id": "",
                         "prompt_name": "",
@@ -659,8 +748,9 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
 
                 resolved_rows = {}
                 for rel in y_values:
-                    row = ontology_resolver.resolve_relation_row(rel, ontology_id)
+                    row = rel_row_cache.get(rel) or ontology_resolver.resolve_relation_row(rel, ontology_id)
                     if row:
+                        rel_row_cache[rel] = row
                         resolved_rows[rel] = row
 
                 if not resolved_rows:
@@ -670,11 +760,18 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                         ontology_resolver,
                     )
                     for rel in fallback_rels:
-                        row = ontology_resolver.resolve_relation_row(rel, ontology_id)
+                        row = rel_row_cache.get(rel) or ontology_resolver.resolve_relation_row(rel, ontology_id)
                         if row:
+                            rel_row_cache[rel] = row
                             resolved_rows[rel] = row
 
                 for rel, row in resolved_rows.items():
+                    rel_raw = rel
+                    rel_canon = (
+                        ontology_resolver.canonical_relation_label(row, ontology_id)
+                        or normalize_text(row.get("predicate_ja"))
+                        or rel_raw
+                    )
                     prompt_id = row.get("prompt_id", "")
                     prompt = ontology_resolver.get_prompt(prompt_id)
                     if not prompt:
@@ -694,12 +791,13 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                             continue
 
                         for arg1, arg2 in _iter_allowed_pairs(x_values, parallel_value_groups):
-                            call_key = (ontology_id, rel, prompt_id, arg1, arg2)
+                            call_key = (ontology_id, rel_canon, prompt_id, arg1, arg2)
                             if call_key in seen_prompt_calls:
                                 if log_dup_skips:
                                     prompt_logs.append({
                                         "id": sent_id,
-                                        "relation_ja": rel,
+                                        "relation_ja": rel_canon,
+                                        "relation_raw": rel_raw,
                                         "ontology_id": ontology_id,
                                         "prompt_id": prompt_id,
                                         "prompt_name": prompt_name,
@@ -715,7 +813,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                             prompt_text = render_prompt(
                                 prompt,
                                 {
-                                    "relation_ja": rel,
+                                    "relation_ja": rel_canon,
                                     "domain_concept_ja": domain_concept,
                                     "range_concept_ja": range_concept,
                                     "arg1": arg1,
@@ -724,9 +822,12 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                 },
                             )
                             verdict = ontology_judge.judge_prompt(prompt_text)
-                            prompt_logs.append({
+                            _m = getattr(ontology_judge, "last_meta", {}) or {}
+                            _e = getattr(ontology_judge, "last_error", None)
+                            _row = {
                                 "id": sent_id,
-                                "relation_ja": rel,
+                                "relation_ja": rel_canon,
+                                "relation_raw": rel_raw,
                                 "ontology_id": ontology_id,
                                 "prompt_id": prompt_id,
                                 "prompt_name": prompt_name,
@@ -735,7 +836,14 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                 "arg2": arg2,
                                 "verdict": verdict,
                                 "prompt_text": prompt_text,
-                            })
+                                "cached": _m.get("cached"),
+                                "model_used": _m.get("model_used"),
+                                "base_url": _m.get("base_url"),
+                                "request_url": _m.get("request_url"),
+                            }
+                            if _e:
+                                _row["error"] = _e
+                            prompt_logs.append(_row)
 
                             # prompt_id=10 is a synonym/normalization gate (not a domain/range verifier).
                             if prompt_id == "10":
@@ -755,7 +863,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                 # Unknown pair-prompt: accept only in the given order.
                                 domain_arg, range_arg = arg1, arg2
 
-                            key = (sent_id, rel, domain_arg, range_arg, prompt_id)
+                            key = (sent_id, rel_canon, domain_arg, range_arg, prompt_id)
                             if key in seen_triples:
                                 continue
                             seen_triples.add(key)
@@ -763,7 +871,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                 "id": sent_id,
                                 "sentence": sentence,
                                 "ontology_id": ontology_id,
-                                "relation_ja": rel,
+                                "relation_ja": rel_canon,
                                 "pid": pid,
                                 "prompt_id": prompt_id,
                                 "prompt_name": prompt_name,
@@ -785,12 +893,13 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
 
                         def _judge_side(side: str, concept: str, argument: str, other_argument: str) -> int:
                             oa = other_argument or "NULL"
-                            call_key = (ontology_id, rel, prompt_id, side, argument, oa)
+                            call_key = (ontology_id, rel_canon, prompt_id, side, argument, oa)
                             if call_key in seen_prompt_calls:
                                 if log_dup_skips:
                                     prompt_logs.append({
                                         "id": sent_id,
-                                        "relation_ja": rel,
+                                        "relation_ja": rel_canon,
+                                        "relation_raw": rel_raw,
                                         "ontology_id": ontology_id,
                                         "prompt_id": prompt_id,
                                         "prompt_name": prompt_name,
@@ -806,7 +915,7 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                             prompt_text = render_prompt(
                                 prompt,
                                 {
-                                    "relation_ja": rel,
+                                    "relation_ja": rel_canon,
                                     "side": side,
                                     "concept_ja": concept,
                                     "argument": argument,
@@ -815,9 +924,12 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                 },
                             )
                             v = ontology_judge.judge_prompt(prompt_text)
-                            prompt_logs.append({
+                            _m = getattr(ontology_judge, "last_meta", {}) or {}
+                            _e = getattr(ontology_judge, "last_error", None)
+                            _row = {
                                 "id": sent_id,
-                                "relation_ja": rel,
+                                "relation_ja": rel_canon,
+                                "relation_raw": rel_raw,
                                 "ontology_id": ontology_id,
                                 "prompt_id": prompt_id,
                                 "prompt_name": prompt_name,
@@ -826,7 +938,14 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                 "other_argument": oa,
                                 "verdict": v,
                                 "prompt_text": prompt_text,
-                            })
+                                "cached": _m.get("cached"),
+                                "model_used": _m.get("model_used"),
+                                "base_url": _m.get("base_url"),
+                                "request_url": _m.get("request_url"),
+                            }
+                            if _e:
+                                _row["error"] = _e
+                            prompt_logs.append(_row)
                             return v
 
                         for a, b in _iter_allowed_pairs(x_values, parallel_value_groups):
@@ -837,14 +956,14 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                 if vr == 1:
                                     domain_arg, range_arg = a, b
                                     verdict = 1
-                                    key = (sent_id, rel, domain_arg, range_arg, prompt_id)
+                                    key = (sent_id, rel_canon, domain_arg, range_arg, prompt_id)
                                     if key not in seen_triples:
                                         seen_triples.add(key)
                                         verified.append({
                                             "id": sent_id,
                                             "sentence": sentence,
                                             "ontology_id": ontology_id,
-                                            "relation_ja": rel,
+                                            "relation_ja": rel_canon,
                                             "pid": pid,
                                             "prompt_id": prompt_id,
                                             "prompt_name": prompt_name,
@@ -865,14 +984,14 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                 if vr == 1:
                                     domain_arg, range_arg = b, a
                                     verdict = 1
-                                    key = (sent_id, rel, domain_arg, range_arg, prompt_id)
+                                    key = (sent_id, rel_canon, domain_arg, range_arg, prompt_id)
                                     if key not in seen_triples:
                                         seen_triples.add(key)
                                         verified.append({
                                             "id": sent_id,
                                             "sentence": sentence,
                                             "ontology_id": ontology_id,
-                                            "relation_ja": rel,
+                                            "relation_ja": rel_canon,
                                             "pid": pid,
                                             "prompt_id": prompt_id,
                                             "prompt_name": prompt_name,
@@ -908,14 +1027,44 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
         t_match = time.time() - t1
         _log_stage("matching_done", t_match_sec=round(t_match, 6), cand_rows=len(candidates), verified_rows=len(verified))
 
+        # Write large results to shard files and send only small metadata via Pipe.
+        # This avoids a deadlock where the child blocks in conn.send() while the parent
+        # waits for the process to exit before reading.
+        shard_dir = os.path.join(payload.get("log_dir") or "", "cpu_shards")
+        os.makedirs(shard_dir, exist_ok=True)
+        safe_id = "".join(ch if (ch.isalnum() or ch in "._-") else "_" for ch in str(sent_id))
+        shard_base = f"{safe_id}.{os.getpid()}"
+        cand_shard = os.path.join(shard_dir, f"{shard_base}.candidates.jsonl")
+        vis_shard = os.path.join(shard_dir, f"{shard_base}.vis.jsonl")
+        verified_shard = os.path.join(shard_dir, f"{shard_base}.verified.jsonl")
+        prompt_shard = os.path.join(shard_dir, f"{shard_base}.prompt.jsonl")
+
+        def _write_jsonl(path: str, rows: list[dict]) -> None:
+            with open(path, "w", encoding="utf-8") as f:
+                for r in rows:
+                    f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+        _write_jsonl(cand_shard, candidates)
+        _write_jsonl(vis_shard, vis_rows)
+        _write_jsonl(verified_shard, verified)
+        _write_jsonl(prompt_shard, prompt_logs)
+
         out = {
             "id": sent_id,
             "sentence": sentence,
             "ontology_id": ontology_id,
-            "candidates": candidates,
-            "vis": vis_rows,
-            "verified": verified,
-            "prompt_logs": prompt_logs,
+            "shards": {
+                "candidate_jsonl": cand_shard,
+                "vis_jsonl": vis_shard,
+                "verified_jsonl": verified_shard,
+                "prompt_jsonl": prompt_shard,
+            },
+            "rows": {
+                "candidate": len(candidates),
+                "vis": len(vis_rows),
+                "verified": len(verified),
+                "prompt": len(prompt_logs),
+            },
             "t_filter": t_filter,
             "t_match": t_match,
             "cand_asts": len(candidate_asts),
@@ -1021,6 +1170,7 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
         return
 
     candidate_csv = os.path.join(output_dir, f"{prefix}_triples_candidate.csv")
+    candidate_slim_csv = os.path.join(output_dir, f"{prefix}_triples_candidate_slim.csv")
     verified_csv = os.path.join(output_dir, f"{prefix}_triples_verified.csv")
     vis_csv = os.path.join(output_dir, f"{prefix}_ast_visualization.csv")
 
@@ -1044,6 +1194,12 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
         pd.DataFrame(columns=triple_cols).to_csv(
             candidate_csv, index=False, encoding="utf-8-sig"
         )
+    slim_cols = ["id", "sentence", "ontology_id", "relation_ja", "domain_arg", "range_arg", "ast_uid", "stage"]
+    if str(os.getenv("EXPORT_CANDIDATE_SLIM", "1")).strip().lower() not in ("0", "false", "no", ""):
+        if not os.path.exists(candidate_slim_csv):
+            pd.DataFrame(columns=slim_cols).to_csv(
+                candidate_slim_csv, index=False, encoding="utf-8-sig"
+            )
     if not os.path.exists(verified_csv):
         pd.DataFrame(columns=triple_cols).to_csv(
             verified_csv, index=False, encoding="utf-8-sig"
@@ -1068,6 +1224,22 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
             w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
             for r in rows:
                 w.writerow({c: r.get(c, "") for c in cols})
+
+    def _append_csv_from_jsonl(path_csv: str, cols: list[str], path_jsonl: str) -> None:
+        if not path_jsonl or (not os.path.exists(path_jsonl)):
+            return
+        with open(path_csv, "a", newline="", encoding="utf-8") as fcsv:
+            w = csv.DictWriter(fcsv, fieldnames=cols, extrasaction="ignore")
+            with open(path_jsonl, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        r = json.loads(line)
+                    except Exception:
+                        continue
+                    w.writerow({c: r.get(c, "") for c in cols})
 
     sent_stats_csv = os.path.join(log_dir, f"{prefix}_sentence_stats.csv")
     gpu_timing_csv = os.path.join(log_dir, f"{prefix}_gpu_timing.csv")
@@ -1202,6 +1374,9 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
 
     def _any_gpu_busy() -> bool:
         return any(w.get("busy") for w in gpu_workers)
+
+    gpu_workers_stopped = False
+    abort_error = None
 
     while (done_gpu < total_gpu) or _any_gpu_busy() or cpu_queue or cpu_slots:
         # Submit tasks to idle GPU workers.
@@ -1362,6 +1537,26 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
                     done_gpu += 1
                     gpu_pbar.update(1)
 
+        # If GPU stage is fully done, stop GPU workers early to release GPU memory for llm-jp/vLLM.
+        # This can materially speed up the CPU stage on 1-GPU machines.
+        if (not gpu_workers_stopped) and (done_gpu >= total_gpu) and (not _any_gpu_busy()):
+            for w in gpu_workers:
+                try:
+                    w["inq"].put(None)
+                except Exception:
+                    pass
+            for w in gpu_workers:
+                try:
+                    w["proc"].join(timeout=2.0)
+                except Exception:
+                    pass
+                if w["proc"].is_alive():
+                    try:
+                        w["proc"].terminate()
+                    except Exception:
+                        pass
+            gpu_workers_stopped = True
+
         while len(cpu_slots) < CPU_WORKERS and cpu_queue:
             payload = cpu_queue.pop(0)
             parent_conn, child_conn = ctx_cpu.Pipe(duplex=False)
@@ -1410,6 +1605,61 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
                         pass
                     with open(cpu_timing_csv, "a", newline="", encoding="utf-8") as fcpu:
                         csv.writer(fcpu).writerow([row_id, "0.000000", "0.000000", 0, 0, "error"])
+                    if _env_flag("ONTOLOGY_VERIFY_STRICT", "1"):
+                        abort_error = f"{out.get('id', row_id)}: {out.get('_error', '')}"
+                        # Best-effort: stop remaining workers so we can exit the loop cleanly.
+                        try:
+                            cpu_queue.clear()
+                        except Exception:
+                            cpu_queue = []
+                        for s2 in cpu_slots:
+                            try:
+                                c2 = s2.get("conn")
+                                if c2:
+                                    try:
+                                        c2.close()
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+                            try:
+                                p2 = s2.get("proc")
+                                if p2 and p2.is_alive():
+                                    try:
+                                        p2.terminate()
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+                        cpu_slots = []
+                        try:
+                            for w2 in gpu_workers:
+                                try:
+                                    w2["busy"] = False
+                                    w2["row_id"] = ""
+                                    w2["row_payload"] = None
+                                except Exception:
+                                    pass
+                                try:
+                                    w2["inq"].put(None)
+                                except Exception:
+                                    pass
+                            for w2 in gpu_workers:
+                                try:
+                                    w2["proc"].join(timeout=0.5)
+                                except Exception:
+                                    pass
+                                if w2["proc"].is_alive():
+                                    try:
+                                        w2["proc"].terminate()
+                                    except Exception:
+                                        pass
+                            gpu_workers_stopped = True
+                        except Exception:
+                            pass
+                        done_gpu = total_gpu
+                        done_cpu = total_cpu
+                        break
                 elif out:
                     with open(cpu_timing_csv, "a", newline="", encoding="utf-8") as fcpu:
                         csv.writer(fcpu).writerow([
@@ -1420,44 +1670,103 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
                             out.get("filtered_asts",0),
                             ""
                         ])
-                    candidate_rows = out.get("candidates", [])
-                    if candidate_rows:
-                        _append_csv_rows(candidate_csv, triple_cols, candidate_rows)
-                    vis_rows = out.get("vis", [])
-                    if vis_rows:
-                        _append_csv_rows(vis_csv, vis_cols, vis_rows)
-                    verified_rows = out.get("verified", [])
-                    if verified_rows:
-                        _append_csv_rows(verified_csv, triple_cols, verified_rows)
-                    # JSONL export of verified triples (subject=domain_arg, object=range_arg).
-                    # One line per processed sentence/id for downstream evaluation.
-                    triples = []
-                    seen_tr = set()
-                    for r in (verified_rows or []):
-                        sub = (r.get("domain_arg") or "").strip()
-                        rel = (r.get("relation_ja") or "").strip()
-                        obj = (r.get("range_arg") or "").strip()
-                        if not sub or not rel or not obj:
-                            continue
-                        key = (sub, rel, obj)
-                        if key in seen_tr:
-                            continue
-                        seen_tr.add(key)
-                        triples.append({"sub": sub, "rel": rel, "obj": obj})
-                    try:
-                        with open(extracted_jsonl_path, "a", encoding="utf-8") as fex:
-                            fex.write(json.dumps({
-                                "id": out.get("id", ""),
-                                "sent_ja": out.get("sentence", ""),
-                                "extracted_triples": triples,
-                            }, ensure_ascii=False) + "\n")
-                    except Exception:
-                        pass
-                    prompt_rows = out.get("prompt_logs", [])
-                    if prompt_rows:
-                        with open(prompt_log_path, "a", encoding="utf-8") as fpl:
-                            for row in prompt_rows:
-                                fpl.write(json.dumps(row, ensure_ascii=False) + "\n")
+                    shards = out.get("shards") or {}
+                    if shards:
+                        _append_csv_from_jsonl(candidate_csv, triple_cols, shards.get("candidate_jsonl", ""))
+                        if os.path.exists(candidate_slim_csv):
+                            _append_csv_from_jsonl(candidate_slim_csv, slim_cols, shards.get("candidate_jsonl", ""))
+                        _append_csv_from_jsonl(vis_csv, vis_cols, shards.get("vis_jsonl", ""))
+                        _append_csv_from_jsonl(verified_csv, triple_cols, shards.get("verified_jsonl", ""))
+
+                        # JSONL export of verified triples (subject=domain_arg, object=range_arg).
+                        triples = []
+                        seen_tr = set()
+                        vpath = shards.get("verified_jsonl", "")
+                        if vpath and os.path.exists(vpath):
+                            with open(vpath, "r", encoding="utf-8") as fv:
+                                for line in fv:
+                                    line = line.strip()
+                                    if not line:
+                                        continue
+                                    try:
+                                        r = json.loads(line)
+                                    except Exception:
+                                        continue
+                                    sub = (r.get("domain_arg") or "").strip()
+                                    rel = (r.get("relation_ja") or "").strip()
+                                    obj = (r.get("range_arg") or "").strip()
+                                    if not sub or not rel or not obj:
+                                        continue
+                                    key = (sub, rel, obj)
+                                    if key in seen_tr:
+                                        continue
+                                    seen_tr.add(key)
+                                    triples.append({"sub": sub, "rel": rel, "obj": obj})
+                        try:
+                            with open(extracted_jsonl_path, "a", encoding="utf-8") as fex:
+                                fex.write(json.dumps({
+                                    "id": out.get("id", ""),
+                                    "sent_ja": out.get("sentence", ""),
+                                    "extracted_triples": triples,
+                                }, ensure_ascii=False) + "\n")
+                        except Exception:
+                            pass
+
+                        ppath = shards.get("prompt_jsonl", "")
+                        if ppath and os.path.exists(ppath):
+                            with open(prompt_log_path, "a", encoding="utf-8") as fpl, open(ppath, "r", encoding="utf-8") as fsrc:
+                                for line in fsrc:
+                                    if line.strip():
+                                        fpl.write(line if line.endswith("\n") else (line + "\n"))
+
+                        # Cleanup shards (best-effort)
+                        for k in ("candidate_jsonl", "vis_jsonl", "verified_jsonl", "prompt_jsonl"):
+                            pth = shards.get(k, "")
+                            if pth and os.path.exists(pth):
+                                try:
+                                    os.remove(pth)
+                                except Exception:
+                                    pass
+                    else:
+                        # Backward-compat path (older workers sending full payloads).
+                        candidate_rows = out.get("candidates", [])
+                        if candidate_rows:
+                            _append_csv_rows(candidate_csv, triple_cols, candidate_rows)
+                            if os.path.exists(candidate_slim_csv):
+                                _append_csv_rows(candidate_slim_csv, slim_cols, candidate_rows)
+                        vis_rows = out.get("vis", [])
+                        if vis_rows:
+                            _append_csv_rows(vis_csv, vis_cols, vis_rows)
+                        verified_rows = out.get("verified", [])
+                        if verified_rows:
+                            _append_csv_rows(verified_csv, triple_cols, verified_rows)
+                        triples = []
+                        seen_tr = set()
+                        for r in (verified_rows or []):
+                            sub = (r.get("domain_arg") or "").strip()
+                            rel = (r.get("relation_ja") or "").strip()
+                            obj = (r.get("range_arg") or "").strip()
+                            if not sub or not rel or not obj:
+                                continue
+                            key = (sub, rel, obj)
+                            if key in seen_tr:
+                                continue
+                            seen_tr.add(key)
+                            triples.append({"sub": sub, "rel": rel, "obj": obj})
+                        try:
+                            with open(extracted_jsonl_path, "a", encoding="utf-8") as fex:
+                                fex.write(json.dumps({
+                                    "id": out.get("id", ""),
+                                    "sent_ja": out.get("sentence", ""),
+                                    "extracted_triples": triples,
+                                }, ensure_ascii=False) + "\n")
+                        except Exception:
+                            pass
+                        prompt_rows = out.get("prompt_logs", [])
+                        if prompt_rows:
+                            with open(prompt_log_path, "a", encoding="utf-8") as fpl:
+                                for row in prompt_rows:
+                                    fpl.write(json.dumps(row, ensure_ascii=False) + "\n")
                 else:
                     with open(cpu_timing_csv, "a", newline="", encoding="utf-8") as fcpu:
                         csv.writer(fcpu).writerow([row_id, "0.000000", "0.000000", 0, 0, "empty"])
@@ -1476,30 +1785,34 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
                     cpu_pbar.update(1)
                 else:
                     still_cpu.append(slot)
-        cpu_slots = still_cpu
+        cpu_slots = [] if abort_error else still_cpu
 
         log_inflight()
         time.sleep(0.01)
 
-    # Stop GPU workers
-    for w in gpu_workers:
-        try:
-            w["inq"].put(None)
-        except Exception:
-            pass
-    for w in gpu_workers:
-        try:
-            w["proc"].join(timeout=1.0)
-        except Exception:
-            pass
-        if w["proc"].is_alive():
+    # Stop GPU workers (if not already stopped earlier)
+    if not locals().get("gpu_workers_stopped", False):
+        for w in gpu_workers:
             try:
-                w["proc"].terminate()
+                w["inq"].put(None)
             except Exception:
                 pass
+        for w in gpu_workers:
+            try:
+                w["proc"].join(timeout=1.0)
+            except Exception:
+                pass
+            if w["proc"].is_alive():
+                try:
+                    w["proc"].terminate()
+                except Exception:
+                    pass
 
     gpu_pbar.close()
     cpu_pbar.close()
+
+    if abort_error:
+        raise RuntimeError(f"fail-fast (ONTOLOGY_VERIFY_STRICT=1): {abort_error}")
 
     elapsed = time.time() - start_ts
     print("抽出処理時間: {:.1f} 秒".format(elapsed))
@@ -1509,12 +1822,27 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
     print("保存先(可視化): {}".format(vis_csv))
     print("ログ: {}".format(log_dir))
 def main():
+    preflight_ontology_llm()
     print("パターンJSONをロード中…")
     patterns = load_and_compile_patterns(
         index_path=PATTERN_INDEX_JSON,
         jsonl_path=PATTERN_JSONL,
     )
     ast_dict = build_ast_dict(patterns)
+    # Pre-build CKYMatcher objects once in the parent process.
+    # CPU workers are forked per sentence, so this avoids rebuilding matchers hundreds of times.
+    try:
+        total_matchers = 0
+        for _v, entries in ast_dict.items():
+            for e in entries:
+                if "matcher" not in e:
+                    e["matcher"] = CKYMatcher(e["ast"], verbose=False)
+                if "parallel_var_groups" not in e:
+                    e["parallel_var_groups"] = extract_parallel_variable_groups(e["ast"])
+                total_matchers += 1
+        print(f"CKYMatcher 事前構築: {total_matchers} パターン")
+    except Exception as e:
+        print(f"[WARN] CKYMatcher 事前構築に失敗: {e}")
     print("ロード完了: {} パターン".format(len(patterns)))
 
     jsonl_paths = sorted(glob(os.path.join(INPUT_JSONL_DIR, "*.jsonl")))
