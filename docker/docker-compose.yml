@@ -41,6 +41,7 @@ services:
     depends_on:
       - llmjp
       - llmjp_onto
+      - llmjp_onto2
 
   # 既存: CKY 並列検証などに使う llm-jp
   llmjp:
@@ -88,7 +89,7 @@ services:
               capabilities: [gpu]
               device_ids: ["1"]
 
-  # 追加: オントロジー整合性検証用 llm-jp（別GPU・別ポート）
+  # 既存: オントロジー整合性検証用 llm-jp（別GPU・別ポート）
   llmjp_onto:
     image: vllm/vllm-openai:latest
     container_name: mi24a008-llmjp-vllm-onto
@@ -134,6 +135,53 @@ services:
             - driver: nvidia
               capabilities: [gpu]
               device_ids: ["2"]
+
+  # 追加: オントロジー整合性検証用 llm-jp その2（別GPU・別ポート）
+  llmjp_onto2:
+    image: vllm/vllm-openai:latest
+    container_name: mi24a008-llmjp-vllm-onto2
+    ipc: host
+
+    volumes:
+      - hf_cache:/root/.cache
+
+    env_file:
+      - .env
+
+    environment:
+      - HF_HOME=/root/.cache/huggingface
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/transformers
+      - HF_HUB_ENABLE_HF_TRANSFER=0
+
+    # ホスト側は 8002、コンテナ内は 8000 のまま
+    ports:
+      - "8002:8000"
+
+    command:
+      - --model
+      - llm-jp/llm-jp-3.1-13b-instruct4
+      - --served-model-name
+      - llm-jp-ont2
+      - --dtype
+      - half
+      - --max-model-len
+      - "4096"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --gpu-memory-utilization
+      - "0.90"
+      - --api-key
+      - local-token
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              device_ids: ["3"]
 
 volumes:
   hf_cache:
