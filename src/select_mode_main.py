@@ -389,140 +389,191 @@ def run_gpu_stage(
         with open(gpu_error_jsonl, "w", encoding="utf-8") as _:
             pass
 
-    ctx = mp.get_context("spawn")
-    out_q: mp.Queue = ctx.Queue()
-    workers: List[Dict[str, Any]] = []
-    for wid in range(GPU_WORKERS):
-        inq = ctx.Queue(maxsize=1)
-        p = ctx.Process(target=gpu_worker_loop, args=(wid, wid, inq, out_q), daemon=True)
-        p.start()
-        workers.append({"wid": wid, "proc": p, "inq": inq, "busy": False, "start": 0.0, "task": None, "retries": 0})
-
     start_ts = time.time()
     total = len(tasks)
-    idx = 0
-    done = 0
-    max_retries_per_task = 1
     results: Dict[str, Dict[str, Any]] = {}
 
-    pbar = tqdm(total=total, desc="GPU stage (match cache)")
-
-    def _any_busy() -> bool:
-        return any(w["busy"] for w in workers)
-
+    # Some environments disallow POSIX semaphores (PermissionError) and thus cannot use multiprocessing.Queue/Lock.
+    # Fall back to a single-process "GPU stage" to keep the pipeline usable.
     try:
-        while (done < total) or _any_busy():
-            for w in workers:
-                if idx >= total:
-                    break
-                if w["busy"]:
-                    continue
-                task = tasks[idx]
-                w["inq"].put(task)
-                w["busy"] = True
-                w["start"] = time.time()
-                w["task"] = task
-                w["retries"] = 0
-                idx += 1
+        ctx = mp.get_context("spawn")
+        out_q: mp.Queue = ctx.Queue()
+        workers: List[Dict[str, Any]] = []
+        for wid in range(GPU_WORKERS):
+            inq = ctx.Queue(maxsize=1)
+            p = ctx.Process(target=gpu_worker_loop, args=(wid, wid, inq, out_q), daemon=True)
+            p.start()
+            workers.append(
+                {"wid": wid, "proc": p, "inq": inq, "busy": False, "start": 0.0, "task": None, "retries": 0}
+            )
 
-            while True:
-                try:
-                    payload = out_q.get_nowait()
-                except queue.Empty:
-                    break
-                wid = payload.get("_worker_id")
-                if wid is None:
-                    continue
+        idx = 0
+        done = 0
+        max_retries_per_task = 1
+
+        pbar = tqdm(total=total, desc="GPU stage (match cache)")
+
+        def _any_busy() -> bool:
+            return any(w["busy"] for w in workers)
+
+        try:
+            while (done < total) or _any_busy():
                 for w in workers:
-                    if w["wid"] == wid:
+                    if idx >= total:
+                        break
+                    if w["busy"]:
+                        continue
+                    task = tasks[idx]
+                    w["inq"].put(task)
+                    w["busy"] = True
+                    w["start"] = time.time()
+                    w["task"] = task
+                    w["retries"] = 0
+                    idx += 1
+
+                while True:
+                    try:
+                        payload = out_q.get_nowait()
+                    except queue.Empty:
+                        break
+                    wid = payload.get("_worker_id")
+                    if wid is None:
+                        continue
+                    for w in workers:
+                        if w["wid"] == wid:
+                            w["busy"] = False
+                            w["task"] = None
+                            break
+
+                    sent = payload.get("sentence", "")
+                    if payload.get("_error"):
+                        _append_jsonl(
+                            gpu_error_jsonl,
+                            [{"ts_sec": time.time() - start_ts, "id": payload.get("id", ""), "error": payload.get("_error")}],
+                        )
+                    else:
+                        results[str(sent)] = payload
+                        with open(gpu_timing_csv, "a", newline="", encoding="utf-8") as f:
+                            csv.writer(f).writerow([payload.get("id", ""), f'{float(payload.get("t_analyze", 0.0)):.6f}'])
+
+                    done += 1
+                    pbar.update(1)
+
+                for w in workers:
+                    if not w["busy"]:
+                        if not w["proc"].is_alive():
+                            try:
+                                w["proc"].join(timeout=0.1)
+                            except Exception:
+                                pass
+                            inq = ctx.Queue(maxsize=1)
+                            p = ctx.Process(target=gpu_worker_loop, args=(w["wid"], w["wid"], inq, out_q), daemon=True)
+                            p.start()
+                            w["inq"] = inq
+                            w["proc"] = p
+                        continue
+
+                    if not w["proc"].is_alive():
+                        task = w.get("task") or {}
+                        _append_jsonl(
+                            gpu_error_jsonl,
+                            [{"ts_sec": time.time() - start_ts, "id": task.get("id", ""), "error": "gpu_worker_died"}],
+                        )
                         w["busy"] = False
                         w["task"] = None
-                        break
+                        done += 1
+                        pbar.update(1)
+                        continue
 
-                sent = payload.get("sentence", "")
-                if payload.get("_error"):
-                    _append_jsonl(gpu_error_jsonl, [{"ts_sec": time.time() - start_ts, "id": payload.get("id", ""), "error": payload.get("_error")}])
-                else:
-                    results[str(sent)] = payload
-                    with open(gpu_timing_csv, "a", newline="", encoding="utf-8") as f:
-                        csv.writer(f).writerow([payload.get("id", ""), f'{float(payload.get("t_analyze", 0.0)):.6f}'])
-
-                done += 1
-                pbar.update(1)
-
-            for w in workers:
-                if not w["busy"]:
-                    if not w["proc"].is_alive():
+                    if (time.time() - w["start"]) > timeout_sec:
+                        task = w.get("task") or {}
+                        row_id = task.get("id", "")
                         try:
-                            w["proc"].join(timeout=0.1)
+                            w["proc"].terminate()
                         except Exception:
                             pass
+                        try:
+                            w["proc"].join(timeout=0.5)
+                        except Exception:
+                            pass
+
+                        with open(gpu_timeout_csv, "a", newline="", encoding="utf-8") as f:
+                            csv.writer(f).writerow([f"{time.time() - start_ts:.3f}", row_id])
+
                         inq = ctx.Queue(maxsize=1)
                         p = ctx.Process(target=gpu_worker_loop, args=(w["wid"], w["wid"], inq, out_q), daemon=True)
                         p.start()
                         w["inq"] = inq
                         w["proc"] = p
-                    continue
 
-                if not w["proc"].is_alive():
-                    task = w.get("task") or {}
-                    _append_jsonl(gpu_error_jsonl, [{"ts_sec": time.time() - start_ts, "id": task.get("id", ""), "error": "gpu_worker_died"}])
-                    w["busy"] = False
-                    w["task"] = None
-                    done += 1
-                    pbar.update(1)
-                    continue
+                        if (task is not None) and (w.get("retries", 0) < max_retries_per_task):
+                            w["retries"] = w.get("retries", 0) + 1
+                            w["start"] = time.time()
+                            w["inq"].put(task)
+                        else:
+                            w["busy"] = False
+                            w["task"] = None
+                            done += 1
+                            pbar.update(1)
 
-                if (time.time() - w["start"]) > timeout_sec:
-                    task = w.get("task") or {}
-                    row_id = task.get("id", "")
+                time.sleep(0.01)
+        finally:
+            pbar.close()
+            for w in workers:
+                try:
+                    w["inq"].put(None)
+                except Exception:
+                    pass
+            for w in workers:
+                try:
+                    w["proc"].join(timeout=1.0)
+                except Exception:
+                    pass
+                if w["proc"].is_alive():
                     try:
                         w["proc"].terminate()
                     except Exception:
                         pass
-                    try:
-                        w["proc"].join(timeout=0.5)
-                    except Exception:
-                        pass
 
-                    with open(gpu_timeout_csv, "a", newline="", encoding="utf-8") as f:
-                        csv.writer(f).writerow([f"{time.time() - start_ts:.3f}", row_id])
+        return results
 
-                    inq = ctx.Queue(maxsize=1)
-                    p = ctx.Process(target=gpu_worker_loop, args=(w["wid"], w["wid"], inq, out_q), daemon=True)
-                    p.start()
-                    w["inq"] = inq
-                    w["proc"] = p
+    except PermissionError as e:
+        _append_jsonl(gpu_error_jsonl, [{"ts_sec": 0.0, "id": "", "error": f"mp_disabled: {type(e).__name__}: {e}"}])
+        print(f"[WARN] multiprocessing が利用できないため単一プロセスにフォールバックします: {type(e).__name__}: {e}")
 
-                    if (task is not None) and (w.get("retries", 0) < max_retries_per_task):
-                        w["retries"] = w.get("retries", 0) + 1
-                        w["start"] = time.time()
-                        w["inq"].put(task)
-                    else:
-                        w["busy"] = False
-                        w["task"] = None
-                        done += 1
-                        pbar.update(1)
-
-            time.sleep(0.01)
-    finally:
-        pbar.close()
-        for w in workers:
-            try:
-                w["inq"].put(None)
-            except Exception:
-                pass
-        for w in workers:
-            try:
-                w["proc"].join(timeout=1.0)
-            except Exception:
-                pass
-            if w["proc"].is_alive():
-                try:
-                    w["proc"].terminate()
-                except Exception:
-                    pass
-
+    # Single-process fallback.
+    analyzer = CKYAnalyzer()
+    pbar2 = tqdm(total=total, desc="GPU stage (single-process)")
+    for task in tasks:
+        row_id = task.get("id", "")
+        sent = task.get("sent", "")
+        cky_table = task.get("cky_table")
+        try:
+            t0 = time.time()
+            cky_dep = analyzer.analyze_cky_table(cky_table)
+            t_analyze = time.time() - t0
+            if t_analyze > float(timeout_sec):
+                with open(gpu_timeout_csv, "a", newline="", encoding="utf-8") as f:
+                    csv.writer(f).writerow([f"{time.time() - start_ts:.3f}", row_id])
+            else:
+                results[str(sent)] = {
+                    "_worker_id": -1,
+                    "id": row_id,
+                    "sentence": sent,
+                    "cky_dep": cky_dep,
+                    "clauses": task.get("clauses", []),
+                    "t_analyze": t_analyze,
+                }
+                with open(gpu_timing_csv, "a", newline="", encoding="utf-8") as f:
+                    csv.writer(f).writerow([row_id, f"{t_analyze:.6f}"])
+        except Exception as ex:
+            _append_jsonl(
+                gpu_error_jsonl,
+                [{"ts_sec": time.time() - start_ts, "id": row_id, "error": f"{type(ex).__name__}: {ex}"}],
+            )
+        finally:
+            pbar2.update(1)
+    pbar2.close()
     return results
 
 
@@ -718,6 +769,59 @@ def canonicalize_relation(resolver, ontology_id: str, rel_raw: str) -> str:
             or normalize_text(rel_raw)
         )
     return normalize_text(rel_raw)
+
+
+def resolve_relation_by_partial_match(resolver, ontology_id: str, rel_raw: str) -> Optional[str]:
+    """
+    no_verification 用:
+    - パターンの Y 表層を、ontology に定義された relation label/alias に「部分一致」で吸収する
+    - 一致できない（または曖昧）場合は None を返す（= triple を作らない）
+    """
+    rel_raw_n = normalize_text(rel_raw)
+    ont = normalize_text(ontology_id)
+    if not (rel_raw_n and ont):
+        return None
+
+    # Fast path: resolver が直接解決できるならそれを優先。
+    row = resolver.resolve_relation_row(rel_raw_n, ont)
+    if row:
+        out = resolver.canonical_relation_label(row, ont) or normalize_text(row.get("predicate_ja"))
+        return out or None
+
+    alias_pid = load_ontology_relation_aliases(ONTOLOGY_DIR, ont) or {}
+    best_pid: Optional[str] = None
+    best_score = -1.0
+    second_score = -1.0
+
+    for alias, pid in alias_pid.items():
+        a = normalize_text(alias)
+        p = normalize_text(pid)
+        if not (a and p):
+            continue
+        if (a in rel_raw_n) or (rel_raw_n in a):
+            # Prefer tighter/longer match.
+            shorter = min(len(a), len(rel_raw_n))
+            longer = max(len(a), len(rel_raw_n))
+            score = 1.0 if a == rel_raw_n else (shorter / float(longer)) if longer > 0 else 0.0
+            if score > best_score:
+                second_score = best_score
+                best_score = score
+                best_pid = p
+            elif score > second_score:
+                second_score = score
+
+    if best_pid is None:
+        return None
+    # Avoid accidental ties/ambiguity.
+    if (best_score - second_score) < 0.05:
+        return None
+
+    # Resolve via PID to get canonical label and prompt mapping row.
+    row2 = resolver.resolve_relation_row(best_pid, ont) or resolver.resolve_relation_row(rel_raw_n, ont)
+    if not row2:
+        return None
+    out2 = resolver.canonical_relation_label(row2, ont) or normalize_text(row2.get("predicate_ja"))
+    return out2 or None
 
 
 def _is_parallel_pair(a: str, b: str, parallel_value_groups: List[List[str]]) -> bool:
@@ -1049,6 +1153,7 @@ def process_jsonl_select_mode(
 
     judge_parallel = ParallelJudgeLLMJP()
     if mode == "no_verification":
+        # Parallel verification is still executed for logging, but it does not affect extraction here.
         for rr in tqdm(record_rows, desc="parallel(no_verification)"):
             sent_id = rr.get("id", "")
             sentence = rr.get("sentence", "")
@@ -1081,9 +1186,45 @@ def process_jsonl_select_mode(
                         ],
                     )
 
+        # Extract triples from (X, Y) combinations:
+        # - Require relation to be absorbed into ontology-defined one by partial match; otherwise skip.
+        # - For each unordered (arg1,arg2) pair, emit both directions:
+        #   (arg1, rel, arg2) and (arg2, rel, arg1)
         for rr in tqdm(record_rows, desc="extracted_triples(no_verification)"):
-            _append_jsonl(extracted_jsonl_path, [{"id": rr.get("id", ""), "sent_ja": rr.get("sentence", ""), "extracted_triples": []}])
-        print("no_verification: verified は生成しません（0行）。")
+            sent_id = rr.get("id", "")
+            sentence = rr.get("sentence", "")
+            ontology_id = rr.get("ontology_id", "") or ""
+            cache_payload = existing.get(sentence)
+            if not cache_payload:
+                _append_jsonl(extracted_jsonl_path, [{"id": sent_id, "sent_ja": sentence, "extracted_triples": []}])
+                continue
+            matches = cache_payload.get("matches") or []
+
+            triples_out: List[Dict[str, str]] = []
+            seen_tr_set: set[Tuple[str, str, str]] = set()
+
+            for m in matches:
+                x_values = list(m.get("X_values", []) or [])
+                y_values = list(m.get("Y_values", []) or [])
+                if len(x_values) < 2:
+                    continue
+                for yv in y_values:
+                    rel = resolve_relation_by_partial_match(ontology_resolver, ontology_id, yv)
+                    if not rel:
+                        continue
+                    for a, b in combinations(x_values, 2):
+                        for sub, obj in ((a, b), (b, a)):
+                            if not (sub and obj):
+                                continue
+                            key3 = (sub, rel, obj)
+                            if key3 in seen_tr_set:
+                                continue
+                            seen_tr_set.add(key3)
+                            triples_out.append({"sub": sub, "rel": rel, "obj": obj})
+
+            _append_jsonl(extracted_jsonl_path, [{"id": sent_id, "sent_ja": sentence, "extracted_triples": triples_out}])
+
+        print("no_verification: verified は生成しません（0行）。extracted_triples は match 由来で生成します。")
         return
 
     if mode in ("default", "no_parallel_verification"):

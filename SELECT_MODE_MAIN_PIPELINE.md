@@ -64,7 +64,11 @@
 - 並列構造検証: 実行（ログ目的）
 - オントロジー検証: スキップ
 - verified生成: 0行（ヘッダのみ）
-- extracted_triples: 常に空配列
+- extracted_triples:
+  - パターンで得た `X_values` と `Y_values` から triple を構築する（検証前の疑似抽出）
+  - relation は ontology の relation label/alias に「部分一致」で吸収できたもののみ採用（吸収できない relation は triple を作らない）
+  - Xが2つ以上の場合、各 unordered ペア (arg1,arg2) について両方向を出す:
+    - (sub, rel, obj)=(arg1, relation, arg2) と (arg2, relation, arg1)
 
 ### 3.4 `no_parallel_verification`
 
@@ -145,4 +149,3 @@
 - matchキャッシュ生成時は **LLM（parallel/ontology）を呼ばない**。
   - これにより、`default` と `no_parallel_verification` の差分が再現できる。
 - candidate は常に「検証前」なので、モード差分の比較は verified / prompt log / parallel log を見る。
-
