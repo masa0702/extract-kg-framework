@@ -42,6 +42,9 @@
     `domain_arg`, `range_arg`, `domain_concept_ja`, `range_concept_ja`, `verdict`, `ast_uid`, `stage`
   - `stage` は `candidate` / `verified` を明示（差分を明確化）
   - candidate 側は `prompt_id` / `verdict` などが空の場合がある
+- 候補（candidate）については、閲覧用に最小列へ絞った `candidate_slim` も併せて出力する（既定ON）
+  - `../results/.../<prefix>_triples_candidate_slim.csv`
+  - 列: `id,sentence,ontology_id,relation_ja,domain_arg,range_arg,ast_uid,stage`
 - AST可視化ログ
   - `../results/.../<prefix>_ast_visualization.csv`
   - 変数マッピングやリテラル情報、`pattern_id`/`pattern` を含む
@@ -88,6 +91,10 @@
 - `sent_ja`（無い場合は `sent`）をユニーク化して対象文一覧を作成
 - `ontology_id` 系列が無ければ `DEFAULT_ONTOLOGY_ID` を使用
 - さらに `ont_*.jsonl` のファイル名から `ontology_id` を補完
+  - 補完規則: `ont_1_movie_*.jsonl` → `ont_1_movie`（先頭3トークン）
+  - 注意: 補完された `ontology_id` が `prompts/relation_prompt_map.json` や `ontology/*_ontology_trans_ja.json` に存在しない場合、
+    relation/prompt の解決に失敗しやすく、結果として抽出できる relation が極端に偏ることがある。
+    その場合は JSONL 側に正しい `ontology_id` を入れるか、`DEFAULT_ONTOLOGY_ID` を指定する。
 
 **出力**
 - 文一覧 `sentences`
@@ -186,6 +193,10 @@
 
 7) **抽出ペアの生成（candidate）**
    - `X×Y` の組み合わせで candidate 出力に追記（列名は verified と同一）
+   - `relation_ja` は、`Y` の表層（例: `監督し`）をそのまま出すのではなく、
+     可能な限りオントロジー定義の正規形（canonical label）へ寄せて出力する
+     - 例: `監督し` → `監督`（`label_wiki_ja` 優先）
+   - candidate 段階では domain/range/prompt が未確定のため、`pid/prompt_id/verdict` 等は空のままにする
 
 8) **可視化ログの記録**
    - AST UID, リテラル, 変数マッピングを `ast_visualization.csv` に追記
@@ -212,91 +223,73 @@
 - `ontology/*.json`
 
 **処理**
-1) relation に対応するマッピング行を解決
-   - relationが `Pxxx` なら pidで解決
-   - 日本語述語なら `predicate_ja` で解決
-   - `ontology_id` があれば優先
+0) **前提**
+   - 実行時に Wikidata API は呼ばない（外部ネットワーク依存を避ける）。
+   - relation/prompt/ontology はローカルの
+     `prompts/relation_prompt_map.json`, `prompts/prompts.json`, `ontology/*_ontology_trans_ja.json`
+     から解決する。
 
-2) 対応表から prompt_id を取得しプロンプトを選択
+1) **relation に対応するマッピング行（row）を解決**
+   - 入力: `relation`（`Y*` の文字列）, `ontology_id`
+   - 解決順（安全側の優先順位）:
+     1. `relation` が `P57` のような PID 形式なら PID として解決（`pid`）
+     2. `(ontology_id, predicate_ja)` の完全一致で解決（`relation_prompt_map.json`）
+     3. ontology の `relations.label_ja / label_wiki_ja / label` を alias として許容し、完全一致で解決
+     4. それでもダメなら、ontology スコープ内でファジー一致で解決
+        - 既定 `RELATION_FUZZY_THRESHOLD=0.78`
+        - ベストと2番手が僅差のときは曖昧として棄却（誤マッチ抑止）
+   - `Y` 由来で解決できない場合は、フォールバックとして文中の部分文字列一致で relation 候補を拾って再解決する
+     - `predicate_ja` だけでなく ontology の `label_ja/label_wiki_ja` も探索対象
 
-3) domain/range概念を決定
-   - conceptがQIDのみの場合はオントロジーから日本語ラベルを引く
+2) **prompt の選択**
+   - 対応表（row）から `prompt_id` を取得し、`prompts.json` からテンプレートを引く
 
-4) プロンプト種別の判定（prompts.json）
+3) **domain/range 概念の解決**
+   - row の domain/range が QID のみの場合、ontology ラベル辞書から日本語ラベルへ展開する
+
+4) **プロンプト種別の判定（prompts.json）**
    - **2値（0/1）・side別判定タイプ**: `01,15,17,21`
      - `side=domain` / `side=range` を分けて判定する前提
    - **3値（0/1/2）・方向判定タイプ**: `04`
      - `arg1/arg2` を同時に与え、`verdict=1` で (arg1=domain,arg2=range)、`verdict=2` で逆、`verdict=0` で棄却
    - **2値（0/1）・同義語生成ゲート**: `10`
      - プロンプト本文に「domain/range の割当は確定しなくてよい」と明記されているため、
-       そのまま **verified triple の採否判定に使うのは不適切**（現状は判定に混ざりうる）。
-       運用上は「候補の正規化/同義語生成の前処理」用途に限定し、最終採否は `21` 等で行うのが妥当。
+       **verified triple の採否判定には使わない**（ゲートとしてのログ用途に限定）
 
-5) **X引数（argument候補）の扱い：仕様確定**
-   - 多くのパターンは `X` が2つ（`x_values=[A,B]`）になることが多い。
-   - その場合は「どちらが domain / range か」を **プロンプトで決定**する。
+5) **X引数（argument候補）の扱い**
+   - `x_values` は「そのパターンマッチで得られた X 変数の値集合」（文全体からの全候補ではない）
+   - `x_values` から (arg1,arg2) のペアを作り、プロンプト検証に渡す
 
    5.1) Xが2つ（基本ケース）: `x_values=[A,B]`
-   - 目的: domain/range を **ペアとして確定**し、確定したときだけ verified を生成する。
    - 2値（side別）プロンプトの場合（01/15/17/21）:
-     1. まず `A` を `side=domain` で判定
-     2. `A` が domain としてOK（verdict=1）なら、`B` を `side=range` で判定
-        - `B` もOKなら verified: (domain=A, range=B)
-        - `B` がNGなら、**入れ替え候補**として (domain=B, range=A) を試す（下へ）
-     3. `A` が domain としてNG（verdict=0）なら、`B` を `side=domain` で判定
-     4. `B` が domain としてOK（verdict=1）なら、`A` を `side=range` で判定
-        - `A` もOKなら verified: (domain=B, range=A)
-     5. どちらの割当も成立しなければ棄却（verifiedなし）
-
-     補足:
-     - 現状実装は「domainだけOK / rangeだけOK」を単独で verified に入れる経路があり得るため、
-       上記の **“ペア確定のみ採用”** へ修正するのが望ましい。
-
+     - **domain/range のペアが成立したときのみ** verified を生成する（単独side成立では採用しない）
+     - 判定は「Aをdomain→Bをrange / Bをdomain→Aをrange」の順で試行する
    - 3値（方向判定）プロンプトの場合（04）:
      - `arg1=A, arg2=B` を1回投げる
        - verdict=1 → verified: (domain=A, range=B)
        - verdict=2 → verified: (domain=B, range=A)
        - verdict=0 → 棄却
 
-   5.2) Xが3つ以上（例: `x_values=[A,B,C,...]`）: 並列構造がある前提
-   - 基本方針:
-     - `&` や `ParallelNode` により並列構造が表現されるはずで、並列構造検証（LLM）をパターンマッチング後に実行する。
-     - 並列検証が通った「並列グループ」は **同一として扱う**。
-   - ルール:
-     - 並列要素同士（例: AとBが並列）は domain/range のペア候補として禁止（(A,B) はプロンプト検証前に棄却）
-     - 並列グループと非並列要素（例: C）の組合せは検証対象
-       - 例: A,B が並列、Cが別要素の場合 → (A,C) と (B,C) をそれぞれ検証
-   - 3値判定（04）でも同様に「許可されたペア集合」に対して判定を行う
+   5.2) Xが3つ以上（例: `x_values=[A,B,C,...]`）
+   - 並列判定（`ParallelJudgeLLMJP`）が通った要素は「並列グループ」として扱い、
+     同一グループ内のペア（例: AとBが並列）は domain/range の候補ペアとして禁止する
+   - それ以外の組合せ（例: (A,C), (B,C)）は検証対象
 
-6) 生成する verified の条件（最終）
-   - 「2値・side別」では **domain/range のペアが成立したときのみ** verified を生成する
-   - 「3値・方向判定」では verdict=1/2 のときのみ verified を生成する
-   - それ以外は棄却（candidate は残る）
+6) **relation の canonical 化（表層を ontology に吸収）**
+   - verified 出力の `relation_ja` は、可能な限り ontology に定義された関係ラベルへ正規化する
+   - canonical は ontology の `relations` を参照し、`label_wiki_ja` → `label_ja` → `label` の優先順で選ぶ
+   - 例: `監督し` / `監督した` → `監督`
+   - デバッグ用として `*_prompt_log.jsonl` には `relation_raw`（元の表層）も併記する
 
-7) 検証コスト削減（重複排除）: 仕様確定
-   - 背景:
-     - パターンマッチングは複数のパターンから同一の (relation, argument候補) を再度生成し得る。
-     - LLM検証（オントロジー検証）は高コストなため、同一入力を複数回投げるのは無駄になる。
-   - 方針:
-     - 「パターン単位」を維持しつつ、**LLM検証に入る直前**に「文単位（id単位）」で重複を排除する。
-     - 注意: ここでいう「文単位」は *候補の再生成（全Y×全Xなど）をしない*。あくまで **dedup（重複排除）** のみを行う。
-       - これにより relation を基準に組合せを抑える現行設計（パターン単位）を壊さない。
+7) **重複排除（dedup）とログ**
+   - LLM 検証は高コストなので、同一入力（同一 prompt/arg の組）を文単位で重複して投げない（dedup）
+   - `LOG_DUPLICATE_SKIPS=1` のとき、スキップした重複呼び出しも `prompt_log.jsonl` に `skipped_duplicate=true` で残す
+   - 注意: 現状は **検証ペア数の上限制御は入っていない**ため、`X` が多いパターンでは組合せ爆発し得る
 
-   7.1) dedupキー（推奨）
-   - 3値（方向判定, prompt_id=04 など）:
-     - `key = (ontology_id, relation_ja, prompt_id, arg1, arg2)`
-     - **順序を保持**する（(A,B) と (B,A) は別）
-   - 2値（side別, 01/15/17/21）:
-     - domain判定: `key = (ontology_id, relation_ja, prompt_id, "domain", argument, other_argument)`
-     - range判定 : `key = (ontology_id, relation_ja, prompt_id, "range",  argument, other_argument)`
-     - `other_argument` はプロンプトに含まれるため、原則キーに含める（安全側）。
-
-   7.2) 実装上の注意
-   - 重複排除は「LLM呼び出し単位」で行う（prompt_text生成前でもよい）。
-   - LLMの内部キャッシュ（prompt_text→verdict）とは別に、**上流での重複排除**を入れることで、
-     - 無駄なprompt生成/JSONLログ肥大化も抑えられる。
-   - ただし、出力ログ（prompt_log.jsonl）で「なぜスキップされたか」を追いたい場合は、
-     - `skipped_duplicate=true` のような軽量フラグをログに入れる運用も検討する。
+8) **起動時チェック（preflight）と fail-fast**
+   - `ONTOLOGY_VERIFY_PREFLIGHT=1`（既定）: onto vLLM の `/models` を確認し、到達不可/モデル不一致を開始直後に検出する
+   - `ONTOLOGY_VERIFY_STRICT=1`（既定）: LLM呼び出し失敗を握りつぶさず例外で停止（結果が空で終わるのを防ぐ）
+   - `prompt_log.jsonl` には `model_used/base_url/request_url` や `error` が記録され、原因追跡ができる
 
 **出力**
 - verified 出力に追記（列名は candidate と同一）
