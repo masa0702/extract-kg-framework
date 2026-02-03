@@ -57,8 +57,8 @@ PATTERN_JSONL_DEFAULT = os.getenv(
 INPUT_JSONL_DIR_DEFAULT = os.getenv(
     "INPUT_JSONL_DIR",
     (
-        os.path.join(REPO_ROOT, "data/T2KGB_JA/test_target_data")
-        if os.path.isdir(os.path.join(REPO_ROOT, "data/T2KGB_JA/test_target_data"))
+        os.path.join(REPO_ROOT, "data/T2KGB_JA/extract_target_data")
+        if os.path.isdir(os.path.join(REPO_ROOT, "data/T2KGB_JA/extract_target_data"))
         else os.path.join(REPO_ROOT, "data/T2KGB_JA/target_data")
     ),
 )
@@ -370,15 +370,16 @@ def run_gpu_stage(
     *,
     log_dir: str,
     prefix: str,
+    mode: str,
     timeout_sec: int,
 ) -> Dict[str, Dict[str, Any]]:
     if not tasks:
         return {}
 
     os.makedirs(log_dir, exist_ok=True)
-    gpu_timing_csv = os.path.join(log_dir, f"{prefix}_gpu_timing.csv")
-    gpu_timeout_csv = os.path.join(log_dir, f"{prefix}_gpu_timeout.csv")
-    gpu_error_jsonl = os.path.join(log_dir, f"{prefix}_gpu_errors.jsonl")
+    gpu_timing_csv = os.path.join(log_dir, f"{mode}_{prefix}_gpu_timing.csv")
+    gpu_timeout_csv = os.path.join(log_dir, f"{mode}_{prefix}_gpu_timeout.csv")
+    gpu_error_jsonl = os.path.join(log_dir, f"{mode}_{prefix}_gpu_errors.jsonl")
     if not os.path.exists(gpu_timing_csv):
         with open(gpu_timing_csv, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(["id", "t_analyze_sec"])
@@ -938,11 +939,11 @@ def process_jsonl_select_mode(
     # Prepare output paths (run-scoped).
     candidate_csv = os.path.join(run_dir, f"{prefix}_triples_candidate.csv")
     candidate_slim_csv = os.path.join(run_dir, f"{prefix}_triples_candidate_slim.csv")
-    verified_csv = os.path.join(run_dir, f"{prefix}_triples_verified.csv")
-    vis_csv = os.path.join(run_dir, f"{prefix}_ast_visualization.csv")
-    prompt_log_path = os.path.join(run_dir, f"{prefix}_prompt_log.jsonl")
-    extracted_jsonl_path = os.path.join(run_dir, f"{prefix}_extracted_triples.jsonl")
-    parallel_log_path = os.path.join(run_log_dir, f"{prefix}_parallel_verify.jsonl")
+    verified_csv = os.path.join(run_dir, f"{args.mode}_{prefix}_triples_verified.csv")
+    vis_csv = os.path.join(run_dir, f"{args.mode}_{prefix}_ast_visualization.csv")
+    prompt_log_path = os.path.join(run_dir, f"{args.mode}_{prefix}_prompt_log.jsonl")
+    extracted_jsonl_path = os.path.join(run_dir, f"{args.mode}_{prefix}_extracted_triples.jsonl")
+    parallel_log_path = os.path.join(run_log_dir, f"{args.mode}_{prefix}_parallel_verify.jsonl")
 
     triple_cols = [
         "id",
@@ -1021,7 +1022,7 @@ def process_jsonl_select_mode(
 
     if to_build:
         print(f"matchキャッシュ生成: {len(to_build)} 文 (cache_mode={args.cache_mode})")
-        gpu_results = run_gpu_stage(to_build, log_dir=run_log_dir, prefix=prefix, timeout_sec=GPU_TIMEOUT_SEC)
+        gpu_results = run_gpu_stage(to_build, log_dir=run_log_dir, prefix=prefix, mode=args.mode, timeout_sec=GPU_TIMEOUT_SEC)
         ok = 0
         for task in tqdm(to_build, desc="Match stage (cache)"):
             sent = task.get("sent", "")

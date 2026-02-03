@@ -133,14 +133,14 @@
 
 - `*_triples_candidate.csv`
 - `*_triples_candidate_slim.csv`（`--export_candidate_slim=1` のとき）
-- `*_triples_verified.csv`
-- `*_ast_visualization.csv`
-- `*_prompt_log.jsonl`
-- `*_extracted_triples.jsonl`
+- `<mode>_*_triples_verified.csv`
+- `<mode>_*_ast_visualization.csv`
+- `<mode>_*_prompt_log.jsonl`
+- `<mode>_*_extracted_triples.jsonl`
 
 ### 5.3 並列検証ログ
 
-- `select_mode/<run_tag>/logs/<prefix>_parallel_verify.jsonl`
+- `select_mode/<run_tag>/logs/<mode>_<prefix>_parallel_verify.jsonl`
 
 ---
 
