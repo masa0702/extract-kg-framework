@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from llm.llmjp_client import get_llmjp_http
+from llm.llmjp_client import get_llmjp_http_for
 
 PID_RE = re.compile(r"^P\d+$")
 QID_RE = re.compile(r"^Q\d+$")
@@ -194,7 +194,9 @@ class RelationPromptResolver:
 
 @dataclass(frozen=True)
 class OntologyJudgeConfig:
-    model: str = "llmjp-13b"
+    # When None, use the model configured on the underlying HTTP client (LLMJPHTTPClient.model),
+    # which is resolved via LLMJP_ONTO_MODEL -> LLMJP_MODEL -> default.
+    model: Optional[str] = None
     max_tokens: int = 64
     temperature: float = 0.0
     cache_size: int = 4096
@@ -203,13 +205,68 @@ class OntologyJudgeConfig:
 class OntologyJudgeLLMJP:
     def __init__(self, cfg: Optional[OntologyJudgeConfig] = None) -> None:
         self.cfg = cfg or OntologyJudgeConfig()
-        self.client = get_llmjp_http()
+        # Use ontology-specific vLLM endpoint(s) for better throughput and scaling.
+        self.client = get_llmjp_http_for("onto")
         self._judge_cached = lru_cache(maxsize=self.cfg.cache_size)(self._judge_uncached)
+        self.last_error: Optional[str] = None
+        self.last_meta: Dict[str, Any] = {}
+        self._strict = str(os.getenv("ONTOLOGY_VERIFY_STRICT", "1")).strip().lower() not in ("0", "false", "no", "")
 
     def judge_prompt(self, prompt_text: str) -> int:
+        self.last_error = None
+        # Clear request metadata so cache hits don't inherit previous request values.
+        try:
+            setattr(self.client, "last_base_url", None)
+            setattr(self.client, "last_url", None)
+        except Exception:
+            pass
+        self.last_meta = {
+            "cached": False,
+            "model_used": (self.cfg.model or getattr(self.client, "model", None)),
+            "base_urls": getattr(self.client, "base_urls", None),
+            "base_url": getattr(self.client, "last_base_url", None),
+            "request_url": getattr(self.client, "last_url", None),
+        }
         if not prompt_text:
             return 0
-        return int(self._judge_cached(prompt_text))
+
+        # Detect cache hit/miss for logging (best-effort).
+        cached = False
+        try:
+            before = self._judge_cached.cache_info()
+        except Exception:
+            before = None
+        try:
+            out = int(self._judge_cached(prompt_text))
+        except Exception as e:
+            self.last_error = f"{type(e).__name__}: {e}"
+            self.last_meta.update(
+                {
+                    "cached": False,
+                    "base_url": getattr(self.client, "last_base_url", None),
+                    "request_url": getattr(self.client, "last_url", None),
+                    "error": self.last_error,
+                }
+            )
+            if self._strict:
+                mu = self.last_meta.get("model_used")
+                bu = self.last_meta.get("base_url")
+                ru = self.last_meta.get("request_url")
+                raise RuntimeError(
+                    f"ontology verify failed (model={mu!r} base_url={bu!r} request_url={ru!r}): {self.last_error}"
+                ) from e
+            return 0
+        finally:
+            try:
+                after = self._judge_cached.cache_info()
+                if before and after and (after.hits > before.hits):
+                    cached = True
+            except Exception:
+                cached = False
+            self.last_meta["cached"] = cached
+            self.last_meta["base_url"] = getattr(self.client, "last_base_url", None)
+            self.last_meta["request_url"] = getattr(self.client, "last_url", None)
+        return out
 
     def _judge_uncached(self, prompt_text: str) -> int:
         messages = [{"role": "user", "content": prompt_text}]
@@ -218,11 +275,26 @@ class OntologyJudgeLLMJP:
                 messages,
                 json_schema=_VERDICT_SCHEMA,
                 schema_name="ontology-verify",
+                # IMPORTANT: Do not override onto server's served model name by default.
+                # When cfg.model is None, let the underlying client decide (LLMJP_ONTO_MODEL etc.).
                 model=self.cfg.model,
                 max_tokens=self.cfg.max_tokens,
                 temperature=self.cfg.temperature,
             )
-        except Exception:
+        except Exception as e:
+            self.last_error = f"{type(e).__name__}: {e}"
+            self.last_meta.update(
+                {
+                    "cached": False,
+                    "model_used": (self.cfg.model or getattr(self.client, "model", None)),
+                    "base_urls": getattr(self.client, "base_urls", None),
+                    "base_url": getattr(self.client, "last_base_url", None),
+                    "request_url": getattr(self.client, "last_url", None),
+                    "error": self.last_error,
+                }
+            )
+            if self._strict:
+                raise
             return 0
 
         v = obj.get("verdict", 0)

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
-from llm.llmjp_client import get_llmjp_http
+from llm.llmjp_client import get_llmjp_http_for
 
 
 # =========================
@@ -141,7 +141,8 @@ class ParallelJudgeLLMJP:
         self.cfg = cfg or ParallelJudgeConfig()
 
         # HTTP client（Session 再利用のため 1 回だけ生成）
-        self.client = get_llmjp_http()
+        # Use CKY-specific vLLM endpoint(s).
+        self.client = get_llmjp_http_for("cky")
 
         self.stats = ParallelJudgeStats()
 

@@ -64,6 +64,9 @@ class LLMJPHTTPClient:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
         }
+        # Best-effort request metadata for debugging/logging.
+        self.last_base_url: Optional[str] = None
+        self.last_url: Optional[str] = None
 
     def chat_json(
         self,
@@ -93,6 +96,10 @@ class LLMJPHTTPClient:
         data = self._post_with_retry("/chat/completions", payload)
         content = data["choices"][0]["message"]["content"]
         return json.loads(content)
+
+    def list_models(self) -> Dict[str, Any]:
+        """OpenAI互換の /v1/models を叩いて、サーバが提供しているモデル一覧を返す。"""
+        return self._get_with_retry("/models")
 
     def _pick_base_url(self, *, attempt: int) -> str:
         # attempt を混ぜて、リトライ時に別サーバへ移る（サーバ落ち/過負荷時の回復を狙う）
@@ -154,9 +161,36 @@ class LLMJPHTTPClient:
             try:
                 base = self._pick_base_url(attempt=attempt)
                 url = f"{base}{path}"
+                self.last_base_url = base
+                self.last_url = url
                 r = self._session.post(url, headers=self._headers, json=payload, timeout=self.timeout_sec)
 
                 # vLLM/OpenAI互換サーバとしての一般的な一時エラーはリトライ対象
+                if r.status_code in (408, 409, 429, 500, 502, 503, 504):
+                    raise RuntimeError(f"HTTP {r.status_code}: {r.text}")
+
+                r.raise_for_status()
+                return r.json()
+
+            except Exception as e:
+                last_err = e
+                if attempt >= self.max_retries:
+                    break
+                time.sleep(self.backoff_sec * (2 ** attempt))
+
+        raise RuntimeError(f"vLLM呼び出しに失敗: {last_err}") from last_err
+
+    def _get_with_retry(self, path: str) -> Dict[str, Any]:
+        last_err: Optional[Exception] = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                base = self._pick_base_url(attempt=attempt)
+                url = f"{base}{path}"
+                self.last_base_url = base
+                self.last_url = url
+                r = self._session.get(url, headers=self._headers, timeout=self.timeout_sec)
+
                 if r.status_code in (408, 409, 429, 500, 502, 503, 504):
                     raise RuntimeError(f"HTTP {r.status_code}: {r.text}")
 
@@ -317,18 +351,21 @@ def get_llmjp_http_for(
     if u == "cky":
         bu = os.getenv("LLMJP_CKY_BASE_URL")
         bus = _split_base_urls(os.getenv("LLMJP_CKY_BASE_URLS"))
+        m = os.getenv("LLMJP_CKY_MODEL")
     elif u == "onto":
         bu = os.getenv("LLMJP_ONTO_BASE_URL")
         bus = _split_base_urls(os.getenv("LLMJP_ONTO_BASE_URLS"))
+        m = os.getenv("LLMJP_ONTO_MODEL")
     else:
         bu = os.getenv("LLMJP_BASE_URL")
         bus = _split_base_urls(os.getenv("LLMJP_BASE_URLS"))
+        m = os.getenv("LLMJP_MODEL")
 
     return get_llmjp_http(
         base_url=bu,
         base_urls=bus,
         api_key=api_key,
-        model=model,
+        model=(model or m),
         system_prompt=system_prompt,
         timeout_sec=timeout_sec,
         max_retries=max_retries,
