@@ -57,6 +57,7 @@ from modules_core.ontology_verify import (
     normalize_text,
     load_ontology_relation_aliases,
 )
+from modules_core.text_normalize import strip_trailing_particles
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -269,6 +270,7 @@ def extract_relation_candidates_from_sentence(
 def clean_variable_mapping(varmap, clauses):
     new_map = {}
     for var, val in varmap.items():
+        raw_val = str(val) if (val is not None) else ""
         found = None
         for cl in clauses:
             if cl[0] == val:
@@ -278,18 +280,13 @@ def clean_variable_mapping(varmap, clauses):
                 if val and isinstance(val, str) and cl[0] in val:
                     found = cl
                     break
-        if found:
-            tokens = found[2]
-            xpos   = found[4]
-            filtered = []
-            for tok, pos in zip(tokens, xpos):
-                if any(x in pos for x in EXCLUDE_POS):
-                    continue
-                filtered.append(tok)
-            if filtered:
-                new_map[var] = "".join(filtered)
-        else:
-            new_map[var] = val
+        if not found:
+            new_map[var] = strip_trailing_particles(raw_val)
+            continue
+
+        # Keep spaces inside bunsetsu (e.g., "New York") and keep internal particles ("太郎の車").
+        surface = str(found[0]) if (found and len(found) > 0) else raw_val
+        new_map[var] = strip_trailing_particles(surface)
     return new_map
 
 def build_sentence_text_and_offsets(clauses):
@@ -1692,9 +1689,9 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
                                         r = json.loads(line)
                                     except Exception:
                                         continue
-                                    sub = (r.get("domain_arg") or "").strip()
+                                    sub = strip_trailing_particles((r.get("domain_arg") or ""))
                                     rel = (r.get("relation_ja") or "").strip()
-                                    obj = (r.get("range_arg") or "").strip()
+                                    obj = strip_trailing_particles((r.get("range_arg") or ""))
                                     if not sub or not rel or not obj:
                                         continue
                                     key = (sub, rel, obj)
@@ -1743,9 +1740,9 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
                         triples = []
                         seen_tr = set()
                         for r in (verified_rows or []):
-                            sub = (r.get("domain_arg") or "").strip()
+                            sub = strip_trailing_particles((r.get("domain_arg") or ""))
                             rel = (r.get("relation_ja") or "").strip()
-                            obj = (r.get("range_arg") or "").strip()
+                            obj = strip_trailing_particles((r.get("range_arg") or ""))
                             if not sub or not rel or not obj:
                                 continue
                             key = (sub, rel, obj)

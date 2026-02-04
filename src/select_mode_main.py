@@ -41,6 +41,7 @@ from modules_core.ontology_verify import (
     render_prompt,
 )
 from modules_core.pattern_compiler import build_ast_dict, load_and_compile_patterns
+from modules_core.text_normalize import strip_trailing_particles
 from pattern.pattern_nodes import ParallelNode, VariableNode
 
 
@@ -224,6 +225,7 @@ def literals_in_order_within_span(
 def clean_variable_mapping(varmap: Dict[str, Any], clauses: List[List[Any]]) -> Dict[str, str]:
     new_map: Dict[str, str] = {}
     for var, val in (varmap or {}).items():
+        raw_val = str(val) if (val is not None) else ""
         found = None
         for cl in clauses:
             if cl[0] == val:
@@ -233,20 +235,13 @@ def clean_variable_mapping(varmap: Dict[str, Any], clauses: List[List[Any]]) -> 
                 found = cl
                 break
         if not found:
-            new_map[str(var)] = str(val) if (val is not None) else ""
+            new_map[str(var)] = strip_trailing_particles(raw_val)
             continue
 
-        tokens = found[2] if len(found) > 2 else []
-        xpos = found[4] if len(found) > 4 else []
-        filtered: List[str] = []
-        for tok, pos in zip(tokens, xpos):
-            if any(x in pos for x in EXCLUDE_POS):
-                continue
-            filtered.append(tok)
-        if filtered:
-            new_map[str(var)] = "".join(filtered)
-        else:
-            new_map[str(var)] = str(val) if (val is not None) else ""
+        # Important: keep spaces inside bunsetsu (e.g., "New York") for Wikidata search.
+        # Also, do NOT delete internal particles like "太郎の車".
+        surface = str(found[0]) if (found and len(found) > 0) else raw_val
+        new_map[str(var)] = strip_trailing_particles(surface)
     return new_map
 
 
@@ -1592,9 +1587,9 @@ def process_jsonl_select_mode(
                     wver.writerow(r)
                 verified_rows_total += len(verified_rows)
                 for r in verified_rows:
-                    sub = (r.get("domain_arg") or "").strip()
+                    sub = strip_trailing_particles((r.get("domain_arg") or ""))
                     rel = (r.get("relation_ja") or "").strip()
-                    obj = (r.get("range_arg") or "").strip()
+                    obj = strip_trailing_particles((r.get("range_arg") or ""))
                     if not sub or not rel or not obj:
                         continue
                     key3 = (sub, rel, obj)

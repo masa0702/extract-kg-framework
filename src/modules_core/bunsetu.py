@@ -294,6 +294,52 @@ def _merge_consecutive_english_spans(spans):
     return merged
 
 
+# ---------------- 空白ブリッジ（英語系） ----------------
+def _merge_whitespace_bridged_entityish_spans(spans):
+    """
+    空白（スペース）をまたいで分割された span を、1文節として扱えるようにマージする。
+
+    目的:
+    - 和訳データ中の英語固有表現（例: "New York", "Alice 's Wonderland"）で、
+      空白が原因で文節が分割され、後段で空白が欠落してID検索（Wikidata等）に失敗するのを防ぐ。
+
+    方針:
+    - doc.text 上で span 間が「空白のみ」の場合に限り、
+      span が英数字/カタカナ中心（固有表現らしい）なら連結する。
+    """
+    if not spans:
+        return spans
+
+    doc = spans[0].doc
+
+    def _is_entityish_span(sp) -> bool:
+        # 英数字・カタカナ・一部記号を許容（空白自体は span 外なのでここでは不要）
+        return all(re.match(r"^[A-Za-z0-9ァ-ンヴー・'’\\-\\.]+$", tok.text) for tok in sp)
+
+    merged = []
+    buf = [spans[0]]
+
+    for sp in spans[1:]:
+        prev = buf[-1]
+        bridge = doc.text[prev.end_char : sp.start_char]
+        if bridge and bridge.isspace() and _is_entityish_span(prev) and _is_entityish_span(sp):
+            buf.append(sp)
+            continue
+        # flush
+        if len(buf) >= 2:
+            merged.append(doc[buf[0].start : buf[-1].end])
+        else:
+            merged.append(buf[0])
+        buf = [sp]
+
+    if buf:
+        if len(buf) >= 2:
+            merged.append(doc[buf[0].start : buf[-1].end])
+        else:
+            merged.append(buf[0])
+    return merged
+
+
 # ---------------- メインクラス --------------------
 class BunsetsuSegmenter:
     @staticmethod
@@ -309,6 +355,7 @@ class BunsetsuSegmenter:
         spans = _merge_preceding_chunk(spans, POST_PATTERNS)  # ④ 固定句マージ
         spans = _merge_consecutive_english_spans(spans)    # ★⑤ 英語連結  ← NEW
         spans = _merge_alnum_katakana_spans(spans)         # ⑥ 英数字+カナ結合
+        spans = _merge_whitespace_bridged_entityish_spans(spans)  # ⑥.5 空白ブリッジ（英語系）
         spans = _merge_trailing_comma(spans)               # ⑦ 読点吸収
 
         # 6. 文節内の接続語で再分割

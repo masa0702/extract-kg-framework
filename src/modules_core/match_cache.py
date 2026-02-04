@@ -8,7 +8,9 @@ from typing import Any, Dict, Iterable, List, Optional
 from modules_core.cache_store import SentenceCacheStore
 
 
-SCHEMA_VERSION = 1
+# v2: varmap_clean/X_values/Y_values now preserve internal spaces (important for Wikidata lookup),
+# and particles are stripped only at the end (not removed from the middle).
+SCHEMA_VERSION = 2
 
 
 def compute_patterns_fingerprint(ast_dict: Dict[int, List[Dict[str, Any]]]) -> str:
@@ -120,4 +122,3 @@ class MatchCacheStore:
             if data is not None:
                 out[s] = data
         return out
-
