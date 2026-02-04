@@ -848,11 +848,27 @@ def process_jsonl_select_mode(
     patterns_fingerprint: str,
     args: argparse.Namespace,
 ) -> None:
-    dir_name = os.path.basename(os.path.dirname(input_jsonl_path))
     filename = os.path.basename(input_jsonl_path)
     prefix = filename[:-6] if filename.endswith(".jsonl") else os.path.splitext(filename)[0]
 
-    base_out_dir = os.path.join(args.results_root, dir_name, prefix)
+    # Keep input directory structure under results_root so ontology/category folders can be mirrored.
+    # Example:
+    #   input_jsonl_dir = data/.../extract_target_data
+    #   input_jsonl_path = data/.../extract_target_data/ont_1_movie/foo.jsonl
+    # => results_root/extract_target_data/ont_1_movie/foo/select_mode/<run_tag>/...
+    input_root_name = os.path.basename(os.path.abspath(str(args.input_jsonl_dir)).rstrip("/"))
+    try:
+        rel_path = os.path.relpath(input_jsonl_path, args.input_jsonl_dir)
+    except Exception:
+        rel_path = os.path.basename(input_jsonl_path)
+    rel_dir = os.path.dirname(rel_path)
+    if rel_dir in ("", "."):
+        rel_dir = ""
+    # Safety: if input_jsonl_path is outside input_jsonl_dir, fall back to non-recursive behavior.
+    if rel_path.startswith(".."):
+        rel_dir = os.path.basename(os.path.dirname(input_jsonl_path))
+
+    base_out_dir = os.path.join(args.results_root, input_root_name, rel_dir, prefix)
     cache_dir = os.path.join(base_out_dir, "cache")
     run_dir = os.path.join(base_out_dir, "select_mode", args.run_tag)
     run_log_dir = os.path.join(run_dir, "logs")
@@ -1642,7 +1658,9 @@ def main() -> None:
     patterns_fingerprint = compute_patterns_fingerprint(ast_dict)
     print(f"patterns_fingerprint: {patterns_fingerprint}")
 
-    jsonl_paths = sorted(glob(os.path.join(args.input_jsonl_dir, "*.jsonl")))
+    # Recurse under input_jsonl_dir to preserve directory structure per ontology/category.
+    jsonl_paths = sorted(glob(os.path.join(args.input_jsonl_dir, "**", "*.jsonl"), recursive=True))
+    jsonl_paths = [p for p in jsonl_paths if os.path.isfile(p)]
     if not jsonl_paths:
         print(f"入力JSONLが見つかりません: {args.input_jsonl_dir}")
         return

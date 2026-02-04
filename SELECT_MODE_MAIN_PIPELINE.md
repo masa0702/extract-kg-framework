@@ -19,6 +19,11 @@
 
 実行入口: `src/select_mode_main.py`
 
+### 2.0 入力ディレクトリの扱い（ディレクトリ構造維持）
+
+- `--input_jsonl_dir` 配下の `**/*.jsonl` を再帰的に処理する。
+- 出力側は `--input_jsonl_dir` 配下の相対パス構造を `results_root` 配下にミラーする。
+
 ### 2.1 CLI（全引数に default あり）
 
 - `--mode`（default: `default`）: `default|no_verification|no_parallel_verification`
@@ -124,10 +129,12 @@
 
 ### 5.1 出力ディレクトリ
 
-- `results_root/<dir>/<prefix>/select_mode/<run_tag>/`
+- `results_root/<input_root>/<relative_dir>/<prefix>/select_mode/<run_tag>/`
   - `logs/`（runログ）
 
-※キャッシュ（dep/cky/match）は `select_mode` 配下ではなく、親の `cache/` を共用する。
+※`<input_root>` は `input_jsonl_dir` のディレクトリ名（basename）。  
+※`<relative_dir>` は `input_jsonl_dir` から見た入力ファイルの相対ディレクトリ（サブディレクトリが無い場合は空）。  
+※キャッシュ（dep/cky/match）は `select_mode` 配下ではなく、同一 `<prefix>` 配下の `cache/` を共用する（run/モードを跨いで再利用）。
 
 ### 5.2 出力ファイル
 
