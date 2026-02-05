@@ -91,7 +91,7 @@ DEFAULT_GPU_TIMEOUT_SEC = 1800
 GPU_TIMEOUT_SEC = int(os.getenv("GPU_TIMEOUT_SEC", str(DEFAULT_GPU_TIMEOUT_SEC)))
 GPU_WORKERS = max(1, int(os.getenv("GPU_WORKERS", "1")))
 
-LIT_MAX_FREQ = 20
+LIT_MAX_FREQ = 150
 
 
 def iter_jsonl(path: str) -> Iterable[Dict[str, Any]]:
@@ -809,7 +809,7 @@ def resolve_relation_by_partial_match(resolver, ontology_id: str, rel_raw: str) 
     if best_pid is None:
         return None
     # Avoid accidental ties/ambiguity.
-    if (best_score - second_score) < 0.05:
+    if (best_score - second_score) < 0.01:
         return None
 
     # Resolve via PID to get canonical label and prompt mapping row.
