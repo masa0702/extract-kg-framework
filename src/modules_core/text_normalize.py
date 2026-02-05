@@ -65,8 +65,8 @@ def strip_trailing_particles(text: str, *, particles: Iterable[str] | None = Non
     if not s:
         return ""
 
-    # Common Japanese particles (keep "の" to avoid harming possessive phrases).
-    parts = list(particles) if particles is not None else ["から", "まで", "より", "が", "は", "を", "に", "へ", "と", "で", "も", "や"]
+    # Common Japanese particles (strip only trailing; internal "の" stays intact).
+    parts = list(particles) if particles is not None else ["から", "まで", "より", "が", "は", "を", "に", "へ", "と", "で", "も", "や", "の"]
 
     changed = True
     while changed and s:
