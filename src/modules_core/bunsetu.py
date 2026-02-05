@@ -255,6 +255,37 @@ def _merge_alnum_katakana_spans(spans):
 
 
 ENG_RE = re.compile(r"^[A-Za-z0-9'’-]+$")  # ハイフンやアポストロフィも許容
+JP_PARTICLES = {
+    "が",
+    "は",
+    "を",
+    "に",
+    "へ",
+    "と",
+    "で",
+    "も",
+    "や",
+    "の",
+    "から",
+    "まで",
+    "より",
+}
+
+
+def _is_jp_particle_token(tok) -> bool:
+    try:
+        text = tok.text
+        pos = tok.pos_
+    except Exception:
+        return False
+    if pos == "ADP" and text in JP_PARTICLES:
+        return True
+    return False
+
+
+def _is_englishish_span(sp) -> bool:
+    tokens = list(sp)
+    return all(ENG_RE.match(tok.text) or tok.pos_ in {"ADP", "PUNCT", "SYM"} for tok in tokens)
 
 def _merge_consecutive_english_spans(spans):
     """
@@ -278,10 +309,17 @@ def _merge_consecutive_english_spans(spans):
             buffer_end = sp.end
             buffer = [sp]
             state = "in_english"
-        elif state == "in_english" and all(
-                ENG_RE.match(tok.text) or tok.pos_ in {"ADP", "PUNCT", "SYM"} for tok in tokens):
-            buffer_end = sp.end
-            buffer.append(sp)
+        elif state == "in_english" and _is_englishish_span(sp):
+            prev_last = list(buffer[-1])[-1] if buffer else None
+            if prev_last is not None and _is_jp_particle_token(prev_last):
+                merged.append(doc[buffer_start:buffer_end])
+                buffer_start = sp.start
+                buffer_end = sp.end
+                buffer = [sp]
+                state = "in_english"
+            else:
+                buffer_end = sp.end
+                buffer.append(sp)
         else:
             if buffer:
                 merged.append(doc[buffer_start:buffer_end])
@@ -300,8 +338,8 @@ def _merge_whitespace_bridged_entityish_spans(spans):
     空白（スペース）をまたいで分割された span を、1文節として扱えるようにマージする。
 
     方針:
-    - doc.text 上で span 間が「空白のみ」の場合は、内容に関係なく連結する。
-      （空白で文節が分割されないようにする）
+    - doc.text 上で span 間が「空白のみ」の場合、助詞境界でなければ連結する。
+      （英語・日本語・数字を含む表記ゆれの分割を避ける）
     """
     if not spans:
         return spans
@@ -315,8 +353,11 @@ def _merge_whitespace_bridged_entityish_spans(spans):
         prev = buf[-1]
         bridge = doc.text[prev.end_char : sp.start_char]
         if bridge and bridge.isspace():
-            buf.append(sp)
-            continue
+            prev_last = list(prev)[-1] if prev is not None else None
+            next_first = list(sp)[0] if sp is not None and len(sp) > 0 else None
+            if not _is_jp_particle_token(prev_last) and not _is_jp_particle_token(next_first):
+                buf.append(sp)
+                continue
         # flush
         if len(buf) >= 2:
             merged.append(doc[buf[0].start : buf[-1].end])
