@@ -81,6 +81,18 @@ def strip_trailing_particles(
     if not s:
         return ""
 
+    # Post-process: remove half-width spaces in specific tokens.
+    s = s.replace(" 's", "'s")
+    s = s.replace(" : ", ": ")
+
+    # If full-width parenthesis exists, drop everything after it.
+    paren_pos = s.find("（")
+    if paren_pos != -1:
+        s = s[:paren_pos]
+        s = _rstrip_any(s, _TRAILING_PUNCT_CHARS)
+        if not s:
+            return ""
+
     # If bunsetsu info is available, remove trailing particles by POS tags.
     # This is more reliable than a static particle list.
     if clause and len(clause) >= 5:
