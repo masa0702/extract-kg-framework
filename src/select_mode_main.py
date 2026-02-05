@@ -65,7 +65,7 @@ INPUT_JSONL_DIR_DEFAULT = os.getenv(
 )
 RESULTS_ROOT_DEFAULT = os.getenv(
     "RESULTS_ROOT",
-    os.path.join(REPO_ROOT, "results/extract_pred_arg_pair"),
+    os.path.join(REPO_ROOT, "results/ver7.0/extract_pred_arg_pair"),
 )
 
 PROMPTS_JSON = os.getenv("PROMPTS_JSON", os.path.join(REPO_ROOT, "prompts/prompts.json"))
@@ -91,7 +91,7 @@ DEFAULT_GPU_TIMEOUT_SEC = 1800
 GPU_TIMEOUT_SEC = int(os.getenv("GPU_TIMEOUT_SEC", str(DEFAULT_GPU_TIMEOUT_SEC)))
 GPU_WORKERS = max(1, int(os.getenv("GPU_WORKERS", "1")))
 
-LIT_MAX_FREQ = 150
+LIT_MAX_FREQ = 200
 
 
 def iter_jsonl(path: str) -> Iterable[Dict[str, Any]]:
@@ -241,7 +241,7 @@ def clean_variable_mapping(varmap: Dict[str, Any], clauses: List[List[Any]]) -> 
         # Important: keep spaces inside bunsetsu (e.g., "New York") for Wikidata search.
         # Also, do NOT delete internal particles like "太郎の車".
         surface = str(found[0]) if (found and len(found) > 0) else raw_val
-        new_map[str(var)] = strip_trailing_particles(surface)
+        new_map[str(var)] = strip_trailing_particles(surface, clause=found)
     return new_map
 
 

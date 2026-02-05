@@ -286,7 +286,7 @@ def clean_variable_mapping(varmap, clauses):
 
         # Keep spaces inside bunsetsu (e.g., "New York") and keep internal particles ("太郎の車").
         surface = str(found[0]) if (found and len(found) > 0) else raw_val
-        new_map[var] = strip_trailing_particles(surface)
+        new_map[var] = strip_trailing_particles(surface, clause=found)
     return new_map
 
 def build_sentence_text_and_offsets(clauses):

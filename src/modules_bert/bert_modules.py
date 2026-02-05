@@ -86,8 +86,8 @@ class CKYAnalyzer:
         max_cell_total = None
         if not guard_off:
             # Defaults per MAIN_PIPELINE_JA.md
-            max_child = _parse_int_with_default("CKY_MAX_CHILD_CANDIDATES", 6)
-            max_cell_total = _parse_int_with_default("CKY_MAX_CELL_CANDIDATES_TOTAL", 34)
+            max_child = _parse_int_with_default("CKY_MAX_CHILD_CANDIDATES", 20)
+            max_cell_total = _parse_int_with_default("CKY_MAX_CELL_CANDIDATES_TOTAL", 128)
 
         # Lightweight stats for diagnostics (read by gpu_child_worker/main).
         self.last_stats = {
