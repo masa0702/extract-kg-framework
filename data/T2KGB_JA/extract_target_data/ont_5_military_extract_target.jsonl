@@ -1,0 +1,115 @@
+{"id":"ont_5_military_test_3","sent_ja":"熊兆仁は1955年に中国人民解放軍少将の階級を授与され、福州軍区の副参謀長を務めました。","verified_triples":[{"sub":"熊兆仁","rel":"軍隊の階級","obj":"中国人民解放軍少将"}]}
+{"id":"ont_5_military_test_6","sent_ja":"Zhang Yulinは宇宙工学の技術者であり、軍隊の階級である中国人民解放軍中将です。","verified_triples":[{"sub":"Zhang Yulin","rel":"軍隊の階級","obj":"中国人民解放軍中将"}]}
+{"id":"ont_5_military_test_9","sent_ja":"フアド・ゼクリは海軍大将であり、エジプト海軍の司令官として1969年6月から9月、1972年10月から1976年11月まで務め、1972年2月12日から1973年10月29日まで副防衛大臣を務めました。","verified_triples":[{"sub":"フアド・ゼクリ","rel":"軍隊の階級","obj":"海軍大将"}]}
+{"id":"ont_5_military_test_10","sent_ja":"苗華は中国人民解放軍海軍上将です。","verified_triples":[{"sub":"苗華","rel":"軍隊の階級","obj":"中国人民解放軍海軍上将"}]}
+{"id":"ont_5_military_test_11","sent_ja":"Wang Jiashengは中国人民解放軍の上将です。","verified_triples":[{"sub":"Wang Jiasheng","rel":"軍隊の階級","obj":"上将"}]}
+{"id":"ont_5_military_test_13","sent_ja":"Amikam Norkinの軍隊の階級はAlufであり、軍種はイスラエル航空宇宙軍です。Amikam Norkinはイスラエルの将軍で、イスラエル航空宇宙軍の現司令官です。","verified_triples":[{"sub":"Amikam Norkin","rel":"軍隊の階級","obj":"Aluf"},{"sub":"Amikam Norkin","rel":"軍種","obj":"イスラエル航空宇宙軍"}]}
+{"id":"ont_5_military_test_14","sent_ja":"Datisはペルシア帝国に仕えたメディアの海軍大将で、ダレイオス大王の下で活躍しました。","verified_triples":[{"sub":"Datis","rel":"軍隊の階級","obj":"海軍大将"}]}
+{"id":"ont_5_military_test_16","sent_ja":"Li Tianyouは中国人民解放軍の上将でした。","verified_triples":[{"sub":"Li Tianyou","rel":"軍隊の階級","obj":"上将"}]}
+{"id":"ont_5_military_test_17","sent_ja":"張知謇は1988年に少将、1990年に中将、1998年に上将に昇進しました。","verified_triples":[{"sub":"張知謇","rel":"軍隊の階級","obj":"上将"}]}
+{"id":"ont_5_military_test_18","sent_ja":"Peter von Siversは、Peter von Sieversとして誤って広く知られていたが、帝国ロシア海軍のドイツ人海軍大将でした。","verified_triples":[{"sub":"Peter von Sivers","rel":"軍隊の階級","obj":"海軍大将"}]}
+{"id":"ont_5_military_test_20","sent_ja":"フョードル・アプラクシンは最初のロシア海軍提督の一人で、エストニアとカレリアを1712年から1723年まで統治し、1708年に海軍大将に任命され、1718年にロシア海軍省を統括し、1723年からバルト艦隊を指揮した。","verified_triples":[{"sub":"フョードル・アプラクシン","rel":"軍隊の階級","obj":"海軍大将"}]}
+{"id":"ont_5_military_test_21","sent_ja":"Ahmed Muhiddin Piriは、ピーリー・レイースとしても知られ、オスマン帝国の軍隊の階級である海軍大将であり、航海士や地理学者や製図家でした。","verified_triples":[{"sub":"ピーリー・レイース","rel":"軍隊の階級","obj":"海軍大将"}]}
+{"id":"ont_5_military_test_22","sent_ja":"Caroline Aigle司令官はフランス空軍の航空士で、25歳のときフランス空軍で初の女性戦闘機パイロットとなり、歴史的な初めてを成し遂げました。","verified_triples":[{"sub":"Caroline Aigle","rel":"軍種","obj":"フランス空軍"}]}
+{"id":"ont_5_military_test_23","sent_ja":"Guo Huaruoは中国人民解放軍中将であり、中国の軍事戦略家です。","verified_triples":[{"sub":"Guo Huaruo","rel":"軍隊の階級","obj":"中国人民解放軍中将"}]}
+{"id":"ont_5_military_test_24","sent_ja":"高晋は軍隊の階級で上将です。","verified_triples":[{"sub":"高晋","rel":"軍隊の階級","obj":"上将"}]}
+{"id":"ont_5_military_test_25","sent_ja":"Johann Wittenborgはヘルシンボリの戦いでハンザ同盟艦隊の海軍大将であり、敗北した後に裁判にかけられ、斬首されました。","verified_triples":[{"sub":"Johann Wittenborg","rel":"軍隊の階級","obj":"海軍大将"}]}
+{"id":"ont_5_military_test_26","sent_ja":"Francisco Verdugoは、オランダ独立戦争におけるスペイン軍の指揮官で、1537年に生まれ、スペイン領ネーデルラントでMaestre de campoとなりました。","verified_triples":[{"sub":"Francisco Verdugo","rel":"軍隊の階級","obj":"Maestre de campo"}]}
+{"id":"ont_5_military_test_27","sent_ja":"王教成は中国人民解放軍陸軍の退役上将です。","verified_triples":[{"sub":"王教成","rel":"軍隊の階級","obj":"上将"}]}
+{"id":"ont_5_military_test_29","sent_ja":"魏鳳和は軍隊の階級上将であり、中国人民解放軍の将軍として、かつて第二砲兵団として知られていた PLAロケット軍の司令官を務めました。","verified_triples":[{"sub":"魏鳳和","rel":"軍隊の階級","obj":"上将"}]}
+{"id":"ont_5_military_test_30","sent_ja":"Karl Ernst Rahtgensは軍隊の階級である中佐の地位にあり、アドルフ・ヒトラー暗殺を目的とした7月20日の暗殺計画への関与のため、ベオグラードで逮捕されました。","verified_triples":[{"sub":"Karl Ernst Rahtgens","rel":"軍隊の階級","obj":"中佐"}]}
+{"id":"ont_5_military_test_31","sent_ja":"張連忠は軍隊の階級として中国人民解放軍海軍上将であり、退役した潜水艦乗組員です。","verified_triples":[{"sub":"張連忠","rel":"軍隊の階級","obj":"中国人民解放軍海軍上将"}]}
+{"id":"ont_5_military_test_32","sent_ja":"Otto Höhneは少尉で、ドイツの第一次世界大戦の飛行エースとして、確認された6回の空中戦勝利があります。","verified_triples":[{"sub":"Otto Höhne","rel":"軍隊の階級","obj":"少尉"}]}
+{"id":"ont_5_military_test_35","sent_ja":"Lysanderは海軍大将で、ヘレスポントでスパルタ艦隊を指揮し、紀元前405年のエゴスポタミの戦いでアテネ軍を破りました。","verified_triples":[{"sub":"Lysander","rel":"軍隊の階級","obj":"海軍大将"}]}
+{"id":"ont_5_military_test_36","sent_ja":"ヴィルヘルム・スションは軍隊の階級として海軍大将であり、第一次世界大戦でドイツ海軍の将校でした。ヴィルヘルム・スションは戦争初期にKaiserliche Marineの地中海艦隊を指揮しました。","verified_triples":[{"sub":"ヴィルヘルム・スション","rel":"軍隊の階級","obj":"海軍大将"}]}
+{"id":"ont_5_military_test_38","sent_ja":"Alexios Doukas Philanthropenosはビザンティンの貴族であり、卓越した海軍大将で、プロトストラトルの階級を有し、後にメガス・ドゥスとなりました。これはマイケルVIIIパレオロゴス（在位1259-1282）の治世中のことです。","verified_triples":[{"sub":"Alexios Doukas Philanthropenos","rel":"軍隊の階級","obj":"海軍大将"}]}
+{"id":"ont_5_military_test_41","sent_ja":"劉暁江は、退役した中国人民解放軍海軍上将で、2008年から2014年まで中国人民解放軍海軍の政治委員を務めました。","verified_triples":[{"sub":"劉暁江","rel":"軍隊の階級","obj":"中国人民解放軍海軍上将"}]}
+{"id":"ont_5_military_test_43","sent_ja":"Wu Changdeは上将で、退役した中国人民解放軍の将軍です。","verified_triples":[{"sub":"Wu Changde","rel":"軍隊の階級","obj":"上将"}]}
+{"id":"ont_5_military_test_44","sent_ja":"張国華は軍隊の階級として中国人民解放軍中将であり、中国の軍人兼政治家で、チベット侵攻と中印戦争の間に勤務し、後にチベット自治区の共産党書記官を務めました。","verified_triples":[{"sub":"張国華","rel":"軍隊の階級","obj":"中国人民解放軍中将"}]}
+{"id":"ont_5_military_test_45","sent_ja":"アンドレイ・エベルガールトの軍隊の階級は海軍大将です。アンドレイ・エベルガールトはドイツ系の血統を持つ帝国ロシア海軍の海軍大将でした。","verified_triples":[{"sub":"アンドレイ・エベルガールト","rel":"軍隊の階級","obj":"海軍大将"}]}
+{"id":"ont_5_military_test_46","sent_ja":"山本五十六は軍隊の階級が海軍大将で、軍種は大日本帝国海軍です。第二次世界大戦中、連合艦隊の司令長官を務め、1943年4月18日に死亡しました。","verified_triples":[{"sub":"山本五十六","rel":"軍隊の階級","obj":"海軍大将"},{"sub":"山本五十六","rel":"軍種","obj":"大日本帝国海軍"}]}
+{"id":"ont_5_military_test_47","sent_ja":"Fredrik von Otterは1884年にコモドール、1892年に副提督、1900年に海軍大将に任命されました。","verified_triples":[{"sub":"Fredrik von Otter","rel":"軍隊の階級","obj":"海軍大将"}]}
+{"id":"ont_5_military_test_48","sent_ja":"劉粤軍は中国人民解放軍の上将で、現在は東部戦区司令官です。","verified_triples":[{"sub":"劉粤軍","rel":"軍隊の階級","obj":"上将"}]}
+{"id":"ont_5_military_test_49","sent_ja":"ドン・フアン・デ・アウストリアは海軍大将で、神聖ローマ皇帝カール5世の私生児です。ドン・フアン・デ・アウストリアはスペインのフェリペ2世王の異母兄弟として軍事指導者となり、レパントの戦いで聖同盟艦隊の提督として最もよく知られています。","verified_triples":[{"sub":"ドン・フアン・デ・アウストリア","rel":"軍隊の階級","obj":"海軍大将"}]}
+{"id":"ont_5_military_test_50","sent_ja":"Otto von Schraderは軍隊の階級である海軍大将で、第二次世界大戦中のドイツ海軍の指揮官であり、ナチス・ドイツのKnight's Cross of the Iron Crossの受章者です。","verified_triples":[{"sub":"Otto von Schrader","rel":"軍隊の階級","obj":"海軍大将"}]}
+{"id":"ont_5_military_test_51","sent_ja":"Nie Liは中国人民解放軍中将という軍隊の階級を持ち、同階級を保持した最初の女性です。","verified_triples":[{"sub":"Nie Li","rel":"軍隊の階級","obj":"中国人民解放軍中将"}]}
+{"id":"ont_5_military_test_53","sent_ja":"Prince Luigi Amedeo , Duke of the Abruzziは軍隊の階級として海軍大将を務め、第一次世界大戦中にイタリアの海軍大将としても活躍しました。","verified_triples":[{"sub":"Prince Luigi Amedeo , Duke of the Abruzzi","rel":"軍隊の階級","obj":"海軍大将"}]}
+{"id":"ont_5_military_test_54","sent_ja":"Xing ShizhongはChinese People's Liberation Armyの上将でした。","verified_triples":[{"sub":"Xing Shizhong","rel":"軍隊の階級","obj":"上将"}]}
+{"id":"ont_5_military_test_55","sent_ja":"Jean Mattonはcapitaineで、第一次世界大戦の騎兵と飛行エースでした。","verified_triples":[{"sub":"Jean Matton","rel":"軍隊の階級","obj":"capitaine"}]}
+{"id":"ont_5_military_test_56","sent_ja":"Wang Guanzhongは軍隊の階級が上将である、1953年2月生まれの中国人民解放軍（PLA）の退役者です。","verified_triples":[{"sub":"Wang Guanzhong","rel":"軍隊の階級","obj":"上将"}]}
+{"id":"ont_5_military_test_57","sent_ja":"Aharon Halivaの軍隊の階級はAlufで、IDFの作戦局を指揮しています。","verified_triples":[{"sub":"Aharon Haliva","rel":"軍隊の階級","obj":"Aluf"}]}
+{"id":"ont_5_military_test_58","sent_ja":"Ferdinand UdvardyはStabsfeldwebelという軍隊の階級で、オーストリア・ハンガリー帝国軍のハンガリー人徴兵兵として、9回の空中戦勝利で評価された飛行エースとなった。","verified_triples":[{"sub":"Ferdinand Udvardy","rel":"軍隊の階級","obj":"Stabsfeldwebel"}]}
+{"id":"ont_5_military_test_60","sent_ja":"Nehemiah Tamariは軍隊の階級Aluf（Aluf）で、イスラエルの少将として1993年から1994年に中央司令部の司令官を務めました。","verified_triples":[{"sub":"Nehemiah Tamari","rel":"軍隊の階級","obj":"Aluf"}]}
+{"id":"ont_5_military_test_61","sent_ja":"マーティン・デンプシーは、1952年3月14日生まれで、時にマーティー・デンプシーとしても知られる、退役したアメリカ陸軍の将軍で、2011年10月1日から2015年9月25日まで第18代統合参謀本部議長を務めました。","verified_triples":[{"sub":"マーティン・デンプシー","rel":"軍種","obj":"アメリカ陸軍"}]}
+{"id":"ont_5_military_test_62","sent_ja":"タイ王室海軍は1993年にアブハカラ・キアーティヴォンセの称号を「我がタイ海軍の父」と公式に発表しました。","verified_triples":[{"sub":"アブハカラ・キアーティヴォンセ","rel":"軍種","obj":"海軍"}]}
+{"id":"ont_5_military_test_63","sent_ja":"ルイス・マウントバッテンはオーストリアで生まれ、イタリアとドイツで育ち、14歳でイギリス海軍に入隊しました。","verified_triples":[{"sub":"ルイス・マウントバッテン","rel":"軍種","obj":"イギリス海軍"}]}
+{"id":"ont_5_military_test_66","sent_ja":"ヤヒヤー・ハーンは第二次世界大戦の地中海戦線に英印軍として参加した後、イギリスが1947年にインドを分割した際にパキスタン国籍を取得し、パキスタン軍に入隊した。そして、1965年にインドとの戦争を引き起こしたインド・カシミールへの秘密潜入作戦の実行を支援した。","verified_triples":[{"sub":"ヤヒヤー・ハーン","rel":"軍種","obj":"英印軍"}]}
+{"id":"ont_5_military_test_70","sent_ja":"ハインリヒ・リーベはドイツ海軍のUボート司令官として勤務し、その後ドイツ海軍の高位指揮部で務めました。","verified_triples":[{"sub":"ハインリヒ・リーベ","rel":"軍種","obj":"ドイツ海軍"}]}
+{"id":"ont_5_military_test_72","sent_ja":"Frank Lukeはアメリカ陸軍航空部の戦闘機エースで、19回の空中勝利が認められ、第一次世界大戦中にCaptain Eddie Rickenbackerに次いで米国陸軍航空部のパイロットの中で2位となった。Frank Lukeはメダル・オブ・オナーを受けた最初の航空兵です。","verified_triples":[{"sub":"Frank Luke","rel":"軍種","obj":"アメリカ陸軍航空部"}]}
+{"id":"ont_5_military_test_77","sent_ja":"ホスニー・ムバーラクが政治に入る前、ホスニー・ムバーラクはエジプト空軍の軍種のキャリアオフィサーでした。","verified_triples":[{"sub":"ホスニー・ムバーラク","rel":"軍種","obj":"エジプト空軍"}]}
+{"id":"ont_5_military_test_78","sent_ja":"Helge Aulebは1941年10月の作戦タイフーン中、VI軍団の一部である第6歩兵師団を指揮しました。","verified_triples":[{"sub":"Helge Auleb","rel":"軍種","obj":"歩兵"}]}
+{"id":"ont_5_military_test_79","sent_ja":"アレクサンドル・コルチャークは1874年11月4日生まれ、1920年2月7日没のロシア帝国海軍の海軍大将であり、軍事指導者兼極地探検家です。アレクサンドル・コルチャークはロシア帝国海軍に勤務し、日露戦争と第一次世界大戦で戦闘に従事しました。","verified_triples":[{"sub":"アレクサンドル・コルチャーク","rel":"軍隊の階級","obj":"海軍大将"},{"sub":"アレクサンドル・コルチャーク","rel":"軍種","obj":"ロシア帝国海軍"}]}
+{"id":"ont_5_military_test_80","sent_ja":"オイゲン・マインドルは、第二次世界大戦中のナチス・ドイツのドイツ空軍に所属したドイツの落下傘部隊将軍でした。","verified_triples":[{"sub":"オイゲン・マインドル","rel":"軍種","obj":"ドイツ空軍"}]}
+{"id":"ont_5_military_test_81","sent_ja":"アブドゥル・ハリス・ナスティオンはインドネシア陸軍の将軍でした。","verified_triples":[{"sub":"アブドゥル・ハリス・ナスティオン","rel":"軍種","obj":"インドネシア陸軍"}]}
+{"id":"ont_5_military_test_83","sent_ja":"Prince Harry , Duke of Sussexはコーネットとしてブルーズ・アンド・ロイヤルズに任命され、Prince Williamと一時的に共に勤務し、そしてPrince Harry , Duke of Sussexは部隊指揮官としての訓練を修了しました。","verified_triples":[{"sub":"Prince Harry , Duke of Sussex","rel":"軍種","obj":"ブルーズ・アンド・ロイヤルズ"}]}
+{"id":"ont_5_military_test_84","sent_ja":"ジョン・フランクリンはイギリス海軍の海軍少将であり、北極探検家でした。","verified_triples":[{"sub":"ジョン・フランクリン","rel":"軍種","obj":"イギリス海軍"}]}
+{"id":"ont_5_military_test_85","sent_ja":"ジョン・B・ゴードンは弁護士と農園主とアメリカ連合国陸軍の将軍と戦後の政治家です。","verified_triples":[{"sub":"ジョン・B・ゴードン","rel":"軍種","obj":"アメリカ連合国陸軍"}]}
+{"id":"ont_5_military_test_86","sent_ja":"ハインリヒ・レーマン＝ヴィレンブロックは第二次世界大戦中のナチス・ドイツのドイツ海軍で潜水艦司令官でした。","verified_triples":[{"sub":"ハインリヒ・レーマン＝ヴィレンブロック","rel":"軍種","obj":"ドイツ海軍"}]}
+{"id":"ont_5_military_test_87","sent_ja":"ヘルムート・フォン・パンヴィッツはドイツの将軍で、第一次世界大戦と第二次世界大戦の間に騎兵の将校でした。","verified_triples":[{"sub":"ヘルムート・フォン・パンヴィッツ","rel":"軍種","obj":"騎兵"}]}
+{"id":"ont_5_military_test_88","sent_ja":"ヘルマン・ホトはドイツ軍隊の司令官と第二次世界大戦中の戦争犯罪者でした。","verified_triples":[{"sub":"ヘルマン・ホト","rel":"軍種","obj":"軍隊"}]}
+{"id":"ont_5_military_test_89","sent_ja":"戦間期に、ピョートル・コシェヴォーイは騎兵部隊の下級指揮官として勤務し、1930年代後半からは参謀職も務めました。","verified_triples":[{"sub":"ピョートル・コシェヴォーイ","rel":"軍種","obj":"騎兵"}]}
+{"id":"ont_5_military_test_90","sent_ja":"エドウィン・オルドリンはアメリカ空軍に入隊し、朝鮮戦争中にジェット戦闘機パイロットとして勤務しました。","verified_triples":[{"sub":"エドウィン・オルドリン","rel":"軍種","obj":"アメリカ空軍"}]}
+{"id":"ont_5_military_test_91","sent_ja":"アンドレイ・エベルガールトの軍隊の階級は海軍大将で、軍種はロシア帝国海軍です。1856年11月9日生まれ、1919年4月19日没の彼は、別名アンドレイ・エベルハルトとしても知られ、ドイツ系血統を持つ人物でした。","verified_triples":[{"sub":"アンドレイ・エベルガールト","rel":"軍隊の階級","obj":"海軍大将"},{"sub":"アンドレイ・エベルガールト","rel":"軍種","obj":"ロシア帝国海軍"}]}
+{"id":"ont_5_military_test_92","sent_ja":"アレクサンダー・シメルフェニグはドイツの兵士で政治革命家であり、後に北軍の将軍となりました。","verified_triples":[{"sub":"アレクサンダー・シメルフェニグ","rel":"軍種","obj":"北軍"}]}
+{"id":"ont_5_military_test_95","sent_ja":"アレクサンドロス・パパゴスはギリシャ陸軍の将校で、第二次世界大戦とギリシャ内戦の後期にギリシャ陸軍を指揮しました。","verified_triples":[{"sub":"アレクサンドロス・パパゴス","rel":"軍種","obj":"ギリシャ陸軍"}]}
+{"id":"ont_5_military_test_99","sent_ja":"アルトゥール・ダ・コスタ・エ・シルヴァはブラジル陸軍の元帥に昇進し、カステロ・ブランコ大統領の軍事政権において戦争大臣を務めました。","verified_triples":[{"sub":"アルトゥール・ダ・コスタ・エ・シルヴァ","rel":"軍隊の階級","obj":"元帥"},{"sub":"アルトゥール・ダ・コスタ・エ・シルヴァ","rel":"軍種","obj":"ブラジル陸軍"}]}
+{"id":"ont_5_military_test_100","sent_ja":"イーヴリン・ウォーはイギリス海兵隊に所属し、第二次世界大戦中はRoyal MarinesとRoyal Horse Guardsで勤務しました。","verified_triples":[{"sub":"イーヴリン・ウォー","rel":"軍種","obj":"イギリス海兵隊"}]}
+{"id":"ont_5_military_test_101","sent_ja":"ゴフ・ホイットラムはオーストラリア空軍で航空ナビゲーターとして第二次世界大戦中に4年間勤務し、戦後は弁護士として働きました。","verified_triples":[{"sub":"ゴフ・ホイットラム","rel":"軍種","obj":"オーストラリア空軍"}]}
+{"id":"ont_5_military_test_102","sent_ja":"スタニスラフ・ペトロフは中佐で、ソ連防空軍に所属しており、1983年のソ連核誤警報事件で重要な役割を果たしました。","verified_triples":[{"sub":"スタニスラフ・ペトロフ","rel":"軍隊の階級","obj":"中佐"},{"sub":"スタニスラフ・ペトロフ","rel":"軍種","obj":"ソ連防空軍"}]}
+{"id":"ont_5_military_test_103","sent_ja":"マクシミリアン・フォン・ヘッセン＝カッセルはヘッセン＝カッセルの王子であり、神聖ローマ帝国軍において総兵装大将と総司令官、そして最終的に帝国総司令官を務めました。","verified_triples":[{"sub":"マクシミリアン・フォン・ヘッセン＝カッセル","rel":"軍種","obj":"神聖ローマ帝国軍"}]}
+{"id":"ont_5_military_test_104","sent_ja":"ハンス・ヨアヒム・マルセイユはフランスのユグノー系の血統を持ち、1938年にドイツ空軍に入隊しました。","verified_triples":[{"sub":"ハンス・ヨアヒム・マルセイユ","rel":"軍種","obj":"ドイツ空軍"}]}
+{"id":"ont_5_military_test_105","sent_ja":"マルコス・ポンテスは軍種がブラジル空軍であるパイロット、エンジニア、AEB宇宙飛行士、そして著者です。","verified_triples":[{"sub":"マルコス・ポンテス","rel":"軍種","obj":"ブラジル空軍"}]}
+{"id":"ont_5_military_test_106","sent_ja":"パーヴェル・レンネンカンプは、義和団の乱と日露戦争の間に、効果的な騎兵指揮官としての評判を得ました。","verified_triples":[{"sub":"パーヴェル・レンネンカンプ","rel":"軍種","obj":"騎兵"}]}
+{"id":"ont_5_military_test_107","sent_ja":"ユーリイ・ガガーリンはソ連空軍にパイロットとして後に加入し、ノルウェー国境付近のルオスタリ空軍基地に配属された後、5人の他の宇宙飛行士とともにソ連宇宙計画に選ばれました。","verified_triples":[{"sub":"ユーリイ・ガガーリン","rel":"軍種","obj":"ソ連空軍"}]}
+{"id":"ont_5_military_test_108","sent_ja":"政治に入る前に、ボブ・ケリーはベトナム戦争でアメリカ海軍のSEAL将校として勤務し、戦闘での英雄的行為により名誉勲章を受賞しました。","verified_triples":[{"sub":"ボブ・ケリー","rel":"軍種","obj":"アメリカ海軍"}]}
+{"id":"ont_5_military_test_109","sent_ja":"Raymond McCreeshはIRA暫定派の軍種であるアイルランド志願兵でした。","verified_triples":[{"sub":"Raymond McCreesh","rel":"軍種","obj":"IRA暫定派"}]}
+{"id":"ont_5_military_test_110","sent_ja":"セルゲイ・ゴルシコフは二度にわたりソビエト連邦英雄の称号を受賞し、ソビエト連邦海軍の拡大を監督して、冷戦期に世界的な海軍へと成長させました。","verified_triples":[{"sub":"セルゲイ・ゴルシコフ","rel":"軍種","obj":"ソビエト連邦海軍"}]}
+{"id":"ont_5_military_test_111","sent_ja":"カール・グスタフ・エミール・マンネルヘイムはロシア帝国陸軍でキャリアを築き、中将に昇進しました。","verified_triples":[{"sub":"カール・グスタフ・エミール・マンネルヘイム","rel":"軍隊の階級","obj":"中将"},{"sub":"カール・グスタフ・エミール・マンネルヘイム","rel":"軍種","obj":"ロシア帝国陸軍"}]}
+{"id":"ont_5_military_test_112","sent_ja":"山下奉文は第二次世界大戦中の大日本帝国陸軍の将軍でした。","verified_triples":[{"sub":"山下奉文","rel":"軍種","obj":"大日本帝国陸軍"}]}
+{"id":"ont_5_military_test_113","sent_ja":"グレース・ホッパーはアメリカ海軍の准将であり、コンピュータ科学者でした。","verified_triples":[{"sub":"グレース・ホッパー","rel":"軍種","obj":"アメリカ海軍"}]}
+{"id":"ont_5_military_test_114","sent_ja":"コンスタンチン・ロコソフスキーはロシア支配下のコンゴレス・ポーランドで生まれ、第一次世界大戦中にロシア帝国陸軍で勤務しました。","verified_triples":[{"sub":"コンスタンチン・ロコソフスキー","rel":"軍種","obj":"ロシア帝国陸軍"}]}
+{"id":"ont_5_military_test_115","sent_ja":"パルヴェーズ・ムシャラフは1961年にパキスタン軍事アカデミーに入学し、1964年にパキスタン陸軍に委任され、アフガニスタン内戦で積極的な役割を果たしました。","verified_triples":[{"sub":"パルヴェーズ・ムシャラフ","rel":"軍種","obj":"パキスタン陸軍"}]}
+{"id":"ont_5_military_test_117","sent_ja":"ヘルムート・カール・ベルンハルト・フォン・モルトケは、プロイセン陸軍の参謀長を30年間務め、新しい、より近代的な野戦指揮方法の創始者と見なされています。","verified_triples":[{"sub":"ヘルムート・カール・ベルンハルト・フォン・モルトケ","rel":"軍種","obj":"プロイセン陸軍"}]}
+{"id":"ont_5_military_test_120","sent_ja":"ゲルト・フォン・ルントシュテットは、長い軍事伝統を持つプロイセンの家系に生まれ、1892年にプロイセン軍隊に入隊しました。","verified_triples":[{"sub":"ゲルト・フォン・ルントシュテット","rel":"軍種","obj":"軍隊"}]}
+{"id":"ont_5_military_test_131","sent_ja":"Charles C. Tewはアメリカ連合国陸軍の大佐で、アメリカ南北戦争中のアンティータムの戦いで戦死しました。","verified_triples":[{"sub":"Charles C. Tew","rel":"軍種","obj":"アメリカ連合国陸軍"}]}
+{"id":"ont_5_military_test_133","sent_ja":"Harry L. Corlはアメリカ海軍の軍種に属する海軍士官で、第二次世界大戦で戦死し、戦闘での功績によりネイビークロスを受章しました。","verified_triples":[{"sub":"Harry L. Corl","rel":"軍種","obj":"アメリカ海軍"}]}
+{"id":"ont_5_military_test_134","sent_ja":"ガダルカナル作戦中、Donald B. Steinakerは上等兵として、1942年10月9日にガダルカナルのマタニカウ川で戦闘中に死亡しました。Donald B. Steinakerの部隊が激しい日本軍の攻勢で襲撃されたときです。","verified_triples":[{"sub":"Donald B. Steinaker","rel":"軍隊の階級","obj":"上等兵"}]}
+{"id":"ont_5_military_test_143","sent_ja":"John E. Kilmerはアメリカ海軍の病院兵で、朝鮮戦争で海兵隊のライフル中隊に配属され、戦闘中に死亡しました。","verified_triples":[{"sub":"John E. Kilmer","rel":"軍種","obj":"アメリカ海軍"}]}
+{"id":"ont_5_military_test_157","sent_ja":"Donald Waltersはアメリカ陸軍の兵站軍曹で、2003年3月23日にイラク南部の都市Nasiriyahでの同じ待ち伏せ作戦でJessica Lynchが捕らえられた際に戦死したと公式に記録されています。","verified_triples":[{"sub":"Donald Walters","rel":"軍種","obj":"アメリカ陸軍"}]}
+{"id":"ont_5_military_test_166","sent_ja":"ダグラス・A・ザンビェックは「Fallujahの獅子」および「Unapologetic Warrior」とも呼ばれ、アメリカ海兵隊の将校であり、CIAのSpecial Activities DivisionのGround Branchのメンバーでもあり、Operation Iraqi Freedomで戦闘中に死亡しました。","verified_triples":[{"sub":"ダグラス・A・ザンビェック","rel":"軍種","obj":"アメリカ海兵隊"}]}
+{"id":"ont_5_military_test_167","sent_ja":"John Raymond Riceはアメリカ陸軍の上等兵曹長で、ホーチャンク族のインディアンでもあり、1950年に韓国で部隊を率いる際に戦闘で死亡しました。","verified_triples":[{"sub":"John Raymond Rice","rel":"軍種","obj":"アメリカ陸軍"}]}
+{"id":"ont_5_military_test_168","sent_ja":"Oliver Mitchellはアメリカ海兵隊の航空兵で、1942年のガダルカナル島の戦いで戦死しました。","verified_triples":[{"sub":"Oliver Mitchell","rel":"軍種","obj":"アメリカ海兵隊"}]}
+{"id":"ont_5_military_test_178","sent_ja":"Jabron Hashmiは下級伍長で、British兵士としてAfghanistanのSanginで戦闘中に死亡しました。","verified_triples":[{"sub":"Jabron Hashmi","rel":"軍隊の階級","obj":"下級伍長"}]}
+{"id":"ont_5_military_test_179","sent_ja":"James M. Scribnerはアメリカ海軍の水兵で、第二次世界大戦中に戦死し、死後にエアメダルを受賞しました。","verified_triples":[{"sub":"James M. Scribner","rel":"軍種","obj":"アメリカ海軍"}]}
+{"id":"ont_5_military_test_186","sent_ja":"Pye Wacketはコンベアのデザインであり、General Dynamics CorporationのConvair部門が1957年に開発した実験的なレンズ形状の空対空ミサイルのコードネームです。","verified_triples":[{"sub":"Pye Wacket","rel":"デザイン","obj":"コンベア"}]}
+{"id":"ont_5_military_test_187","sent_ja":"Stridsvagn m / 42はランズヴェルクがデザインしたLago II-III-IVとして知られ、75 mm L/31砲を装備し、スウェーデンの戦車としては初めてその口径のものとなりました。","verified_triples":[{"sub":"Stridsvagn m / 42","rel":"デザイン","obj":"ランズヴェルク"}]}
+{"id":"ont_5_military_test_191","sent_ja":"三八式十糎加農砲は1905年のKruppデザインのライセンスコピーでした。","verified_triples":[{"sub":"三八式十糎加農砲","rel":"デザイン","obj":"Krupp"}]}
+{"id":"ont_5_military_test_194","sent_ja":"90-II式戦車は中国北方工業公司がデザインしたもので、Norinco製MBT-2000はモロッコ王立軍でも使用されています。","verified_triples":[{"sub":"90-II式戦車","rel":"デザイン","obj":"中国北方工業公司"}]}
+{"id":"ont_5_military_test_195","sent_ja":"K1およびK1Aは国防科学研究所がデザインした、Daewoo Precision Industriesが製造した韓国の選択射撃カービンやアサルトライフルで、1981年に大韓民国軍に配備されました。","verified_triples":[{"sub":"K1","rel":"デザイン","obj":"国防科学研究所"}]}
+{"id":"ont_5_military_test_196","sent_ja":"FGM-172 SRAWは別名Predator SRAWで、軽量かつ近距離ミサイルシステムです。ロッキード・マーティンがデザインし、ロッキード・マーティンが製造、ロッキード・マーティンとイスラエル・ミリタリー・インダストリーズが開発しました。","verified_triples":[{"sub":"FGM-172 SRAW","rel":"デザイン","obj":"ロッキード・マーティン"}]}
+{"id":"ont_5_military_test_197","sent_ja":"SWARMは、スコットランド・グラスゴーにあるタレス・グループがデザインし、製造した、完全装甲のリモート武器システムです。","verified_triples":[{"sub":"SWARM","rel":"デザイン","obj":"タレス・グループ"}]}
+{"id":"ont_5_military_test_199","sent_ja":"RG41は、BAE Systemsの子会社であるLand Systems OMCがデザインした、南アフリカ製の8×8装甲戦闘車両で、地雷耐性保護を備えています。","verified_triples":[{"sub":"RG41","rel":"デザイン","obj":"Land Systems OMC"}]}
+{"id":"ont_5_military_test_200","sent_ja":"BTR-Tはロシアの重歩兵戦闘車両で、オムスクトランスマシュがデザインしたものです。","verified_triples":[{"sub":"BTR-T","rel":"デザイン","obj":"オムスクトランスマシュ"}]}
+{"id":"ont_5_military_test_202","sent_ja":"カッサームロケットはシンプルな鋼鉄製砲兵ロケットで、ハマスの軍事部門であるカッサム旅団によって設計・配備されました。","verified_triples":[{"sub":"カッサームロケット","rel":"デザイン","obj":"カッサム旅団"}]}
+{"id":"ont_5_military_test_203","sent_ja":" . 450 MarlinはホーナディとMarlinのエンジニアチームによってデザインされ、2000年にリリースされました。カートリッジはホーナディが製造し、ライフルはMarlinが製造し、主にModel 1895Mレバーガンが使用されました。","verified_triples":[{"sub":". 450 Marlin","rel":"デザイン","obj":"ホーナディ"}]}
+{"id":"ont_5_military_test_205","sent_ja":"RG-32 ScoutはBAE Systems Land Systems South Africaがデザインした、地雷耐性のある4×4軽装甲車両のファミリーです。","verified_triples":[{"sub":"RG-32 Scout","rel":"デザイン","obj":"BAE Systems Land Systems South Africa"}]}
+{"id":"ont_5_military_test_209","sent_ja":"Abhay歩兵戦闘車はインドで防衛研究開発機構によりデザインされた歩兵戦闘車です。","verified_triples":[{"sub":"Abhay歩兵戦闘車","rel":"デザイン","obj":"防衛研究開発機構"}]}
+{"id":"ont_5_military_test_210","sent_ja":"APC TalhaはパキスタンでHeavy Industries TaxilaのAPC工場によりデザインおよび製造された装甲兵員輸送車です。","verified_triples":[{"sub":"APC Talha","rel":"デザイン","obj":"Heavy Industries Taxila"}]}
+{"id":"ont_5_military_test_212","sent_ja":"Stridsvagn m / 42 デザイン ランズヴェルクは、Lago II-III-IVとして知られ、75 mm L/31砲を装備し、スウェーデンの戦車では同サイズ初の砲でした。","verified_triples":[{"sub":"Stridsvagn m / 42","rel":"デザイン","obj":"ランズヴェルク"}]}
+{"id":"ont_5_military_test_216","sent_ja":"GAZ-3927 ヴォルクのデザインは高度に改造されたGAZ Tigrに基づいています。","verified_triples":[{"sub":"GAZ-3927 ヴォルク","rel":"デザイン","obj":"GAZ"}]}
+{"id":"ont_5_military_test_218","sent_ja":"RG-32 Scoutは、地雷耐性のある4×4軽装甲車のファミリーで、BAE Systems Land Systems South Africaがデザインしました。","verified_triples":[{"sub":"RG-32 Scout","rel":"デザイン","obj":"BAE Systems Land Systems South Africa"}]}
+{"id":"ont_5_military_test_219","sent_ja":"RG-35はLand Systems OMCがデザインした南アフリカ製の地雷耐性アンブッシュプロテクテッド車両で、BAE Systemsの子会社です。","verified_triples":[{"sub":"RG-35","rel":"デザイン","obj":"Land Systems OMC"}]}
+{"id":"ont_5_military_test_220","sent_ja":"タイトルにある「軍曹」の消失は、少将が中将の直上の階級であるという見かけ上の混乱を説明しています。","verified_triples":[{"sub":"少将","rel":"直上の階級","obj":"中将"}]}
+{"id":"ont_5_military_test_225","sent_ja":"ジャイシュ＝エ＝ムハンマドはテロ組織と認定した国カナダ、イギリス、ロシア、パキスタン、オーストラリア、インド、アラブ首長国連邦、アメリカ合衆国、国際連合によってムジャヒディーン組織に指定されています。","verified_triples":[{"sub":"ジャイシュ＝エ＝ムハンマド","rel":"テロ組織と認定した国","obj":"カナダ"},{"sub":"ジャイシュ＝エ＝ムハンマド","rel":"テロ組織と認定した国","obj":"イギリス"},{"sub":"ジャイシュ＝エ＝ムハンマド","rel":"テロ組織と認定した国","obj":"ロシア"}]}
+{"id":"ont_5_military_test_226","sent_ja":"ジャイシュ＝エ＝ムハンマドはロシアやパキスタン、オーストラリア、カナダ、インド、アラブ首長国連邦、イギリス、アメリカ合衆国、そして国際連合によってテロ組織と認定されています。","verified_triples":[{"sub":"ジャイシュ＝エ＝ムハンマド","rel":"テロ組織と認定した国","obj":"国際連合"},{"sub":"ジャイシュ＝エ＝ムハンマド","rel":"テロ組織と認定した国","obj":"ロシア"}]}
+{"id":"ont_5_military_test_229","sent_ja":"六試小型夜間偵察飛行艇は、単発エンジンの複葉機で、帝国海軍の夜間偵察任務を遂行することを意図していました。","verified_triples":[{"sub":"六試小型夜間偵察飛行艇","rel":"翼構成","obj":"複葉機"}]}
