@@ -193,10 +193,16 @@ parallel*/
 results/
 translate*/
 # ontology/
-data/
+data/T2KGB_JA/all_wikidata_tekgen_ground_truth/
+data/T2KGB_JA/manually_verified_id_text/
+data/T2KGB_JA/removed_records/
+data/T2KGB_JA/test_target_data/
+data/patterns/
 learn_data/
 tmp_single_sentence_run/
 results/
 tmp_quick_input/
 tmp_quick_resutls/
 tmp_quick_resutls2/
+
+filter_report_target.json
