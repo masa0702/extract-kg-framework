@@ -661,12 +661,14 @@ def evaluate_pair(
     t_text = EvalTotals()
     t_id = EvalTotals()
     id_eval_possible = False
+    gold_triples_total = 0
 
     for rid in all_ids:
         g = gold.get(rid) or {}
         p = pred.get(rid) or {}
 
         g_tr = _extract_gold_triples(g, gold_field)
+        gold_triples_total += len(g_tr)
         p_tr = _extract_pred_triples(p)
         tp, fp, fn = multiset_match([norm_text_triple(x) for x in p_tr], [norm_text_triple(x) for x in g_tr])
         t_text.tp += tp
@@ -691,6 +693,10 @@ def evaluate_pair(
         "pred_path": pred_path,
         "gold_field": gold_field,
         "covered_only": covered_only,
+        "gold_stats": {
+            "eval_records": len(all_ids),
+            "gold_triples": gold_triples_total,
+        },
         "text": {
             "tp": t_text.tp,
             "fp": t_text.fp,
@@ -897,6 +903,10 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
         totals_id_cov = EvalTotals()
         any_id_all = False
         any_id_cov = False
+        gold_triples_all = 0
+        gold_triples_cov = 0
+        eval_records_all = 0
+        eval_records_cov = 0
 
         for ont_i, category, pred_path in _progress(items, desc=f"評価: ファイル ({prefix})", disable=no_progress, unit="file"):
             gold_path = gold_map[(ont_i, category)]
@@ -926,6 +936,11 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
             totals_text_cov.tp += int(res_cov["text"]["tp"])
             totals_text_cov.fp += int(res_cov["text"]["fp"])
             totals_text_cov.fn += int(res_cov["text"]["fn"])
+
+            gold_triples_all += int(res_all.get("gold_stats", {}).get("gold_triples", 0))
+            gold_triples_cov += int(res_cov.get("gold_stats", {}).get("gold_triples", 0))
+            eval_records_all += int(res_all.get("gold_stats", {}).get("eval_records", 0))
+            eval_records_cov += int(res_cov.get("gold_stats", {}).get("eval_records", 0))
 
             if res_all.get("id") is not None:
                 any_id_all = True
@@ -980,6 +995,10 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
         run_summary_all = {
             "prefix": prefix,
             "files": len(items),
+            "gold_stats": {
+                "eval_records": eval_records_all,
+                "gold_triples": gold_triples_all,
+            },
             "micro_text": {
                 "tp": totals_text_all.tp,
                 "fp": totals_text_all.fp,
@@ -994,6 +1013,10 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
         run_summary_cov = {
             "prefix": prefix,
             "files": len(items),
+            "gold_stats": {
+                "eval_records": eval_records_cov,
+                "gold_triples": gold_triples_cov,
+            },
             "micro_text": {
                 "tp": totals_text_cov.tp,
                 "fp": totals_text_cov.fp,
@@ -1015,6 +1038,8 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
             "prefix",
             "ont_i",
             "category",
+            "eval_records",
+            "gold_triples",
             "tp",
             "fp",
             "fn",
@@ -1037,6 +1062,8 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
                 "prefix": prefix,
                 "ont_i": "micro",
                 "category": "micro",
+                "eval_records": eval_records_all,
+                "gold_triples": gold_triples_all,
                 "tp": totals_text_all.tp,
                 "fp": totals_text_all.fp,
                 "fn": totals_text_all.fn,
@@ -1055,11 +1082,14 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
             ev = r["eval"]
             t = ev["text"]
             tid = ev.get("id") or {}
+            gstat = ev.get("gold_stats") or {}
             tsv_rows_all.append(
                 {
                     "prefix": prefix,
                     "ont_i": r["ont_i"],
                     "category": r["category"],
+                    "eval_records": gstat.get("eval_records", ""),
+                    "gold_triples": gstat.get("gold_triples", ""),
                     "tp": t["tp"],
                     "fp": t["fp"],
                     "fn": t["fn"],
@@ -1084,6 +1114,8 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
                 "prefix": prefix,
                 "ont_i": "micro",
                 "category": "micro",
+                "eval_records": eval_records_cov,
+                "gold_triples": gold_triples_cov,
                 "tp": totals_text_cov.tp,
                 "fp": totals_text_cov.fp,
                 "fn": totals_text_cov.fn,
@@ -1102,11 +1134,14 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
             ev = r["eval"]
             t = ev["text"]
             tid = ev.get("id") or {}
+            gstat = ev.get("gold_stats") or {}
             tsv_rows_cov.append(
                 {
                     "prefix": prefix,
                     "ont_i": r["ont_i"],
                     "category": r["category"],
+                    "eval_records": gstat.get("eval_records", ""),
+                    "gold_triples": gstat.get("gold_triples", ""),
                     "tp": t["tp"],
                     "fp": t["fp"],
                     "fn": t["fn"],
