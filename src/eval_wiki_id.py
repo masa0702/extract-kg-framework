@@ -2,18 +2,19 @@
 """
 eval_wiki_id.py（ローカル完結版の評価スクリプト）
 
-元Notebookの3セル構成を維持するため、3つのサブコマンドを用意しています。
+このスクリプトは「一括実行」専用です。実行すると以下を順に行います。
 
-1) link-ids
-   - extracted_triples（sub/rel/obj）に対してWikidata APIで QID/PID を付与し、with_ids JSONLを出力します。
-   - ネットワークが使えない環境では失敗するので、必要に応じて `--offline`（キャッシュのみ）を使ってください。
+1) ID付与（link）
+   - pred の extracted_triples（sub/rel/obj）に対して Wikidata API で QID/PID を付与し、
+     `eval/<tag>/with_ids/*.jsonl` を出力します。
+   - ネットワークが使えない環境では `--offline`（キャッシュのみ）を使ってください。
 
-2) eval
+2) 全体評価（all）
    - gold と pred を比較して Precision / Recall / F1 を算出します（文字列ベース）。
-   - triple_ids が双方にあれば IDベース評価も算出します。
+   - `triple_ids` が両方にあれば IDベース評価も算出します。
 
-3) eval-covered
-   - eval と同様ですが、pred側の extracted_triples が空のレコードは母集団から除外します。
+3) カバレッジ評価（covered）
+   - 2) と同様ですが、pred 側の extracted_triples が空のレコードは母集団から除外します。
 
 想定入出力（pred: select_mode_main.py などの出力）
   {"id": "...", "sent_ja": "...", "extracted_triples":[{"sub":"...","rel":"...","obj":"..."}, ...]}
@@ -40,9 +41,28 @@ try:
 except Exception:  # pragma: no cover
     requests = None  # type: ignore
 
+try:
+    from tqdm.auto import tqdm
+except Exception:  # pragma: no cover
+    tqdm = None  # type: ignore
+
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 AUTO = "auto"
+
+
+class JaHelpFormatter(argparse.HelpFormatter):
+    def add_usage(self, usage, actions, groups, prefix=None):
+        if prefix is None:
+            prefix = "使い方: "
+        return super().add_usage(usage, actions, groups, prefix)
+
+
+class JaRawTextHelpFormatter(argparse.RawTextHelpFormatter):
+    def add_usage(self, usage, actions, groups, prefix=None):
+        if prefix is None:
+            prefix = "使い方: "
+        return super().add_usage(usage, actions, groups, prefix)
 
 
 def _is_auto(v: Any) -> bool:
@@ -55,6 +75,16 @@ def _is_auto(v: Any) -> bool:
     if isinstance(v, str):
         return (not v.strip()) or (v.strip().lower() == AUTO)
     return False
+
+
+def _add_japanese_help(ap: argparse.ArgumentParser) -> None:
+    ap.add_argument("-h", "--help", action="help", help="このヘルプを表示して終了します。")
+
+
+def _set_help_titles(ap: argparse.ArgumentParser, *, positional: str = "位置引数", optionals: str = "オプション") -> None:
+    # argparse internals, but stable enough for CLI UX improvements
+    ap._positionals.title = positional  # type: ignore[attr-defined]
+    ap._optionals.title = optionals  # type: ignore[attr-defined]
 
 
 def _load_env_file_if_missing(path: str, keys: List[str]) -> None:
@@ -128,6 +158,22 @@ def _default_gold_source() -> Tuple[str, str]:
             return gold_dir, r"^ont_(\d+)_(.+?)_gold\.jsonl$"
     gt_dir = os.path.join(REPO_ROOT, "data/T2KGB_JA/all_wikidata_tekgen_ground_truth")
     return gt_dir, r"^ont_(\d+)_(.+?)_ground_truth\.jsonl$"
+
+
+def _default_gold_pattern_for_dir(gold_dir: str) -> str:
+    """
+    Decide a reasonable default pattern from a gold directory path.
+    """
+    d = (gold_dir or "").replace("\\", "/").lower()
+    if "ground_truth" in d:
+        return r"^ont_(\d+)_(.+?)_ground_truth\.jsonl$"
+    return r"^ont_(\d+)_(.+?)_gold\.jsonl$"
+
+
+def _progress(it: Iterable[Any], *, desc: str, disable: bool, total: Optional[int] = None, unit: str = "") -> Iterable[Any]:
+    if disable or tqdm is None:
+        return it
+    return tqdm(it, desc=desc, total=total, unit=unit)
 
 
 def _iter_extracted_triples_files(
@@ -231,6 +277,21 @@ def write_json(path: str, obj: Any) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
+
+
+def write_tsv(path: str, header: List[str], rows: List[Dict[str, Any]]) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    def _cell(v: Any) -> str:
+        if v is None:
+            return ""
+        s = str(v)
+        return s.replace("\t", " ").replace("\r", " ").replace("\n", " ")
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\t".join(header) + "\n")
+        for r in rows:
+            f.write("\t".join(_cell(r.get(k, "")) for k in header) + "\n")
 
 
 def list_files(dir_path: str, pat: re.Pattern[str]) -> List[str]:
@@ -492,12 +553,13 @@ def cmd_link_ids(args: argparse.Namespace) -> None:
         }
     )
 
-    for prefix, ont_i, category, path in pred_files:
+    no_progress = bool(getattr(args, "no_progress", False))
+    for prefix, ont_i, category, path in _progress(pred_files, desc="ID付与: ファイル", disable=no_progress, unit="file"):
         key = os.path.basename(path)
         out_name = f"{prefix}_ont_{ont_i}_{category}_with_ids.jsonl"
         out_path = os.path.join(out_with_ids_dir, out_name)
         out_rows = []
-        for rec in iter_jsonl(path):
+        for rec in _progress(iter_jsonl(path), desc=f"ID付与: レコード ({key})", disable=no_progress, unit="rec"):
             summary[key]["records_in"] += 1
             triples = rec.get("extracted_triples") or []
             if not isinstance(triples, list):
@@ -764,7 +826,7 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
     if not os.path.isdir(gold_dir):
         raise SystemExit(f"gold_dir not found: {gold_dir}")
     if _is_auto(gold_pattern):
-        gold_pattern = r"^ont_(\d+)_(.+?)_gold\.jsonl$"
+        gold_pattern = _default_gold_pattern_for_dir(gold_dir)
 
     eval_tag = args.eval_tag
     out_dir = _default_eval_root(results_dir, eval_tag) if _is_auto(args.out_dir) else args.out_dir
@@ -822,15 +884,21 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
         "runs": {},
     }
 
+    no_progress = bool(getattr(args, "no_progress", False))
     for prefix, items in sorted(by_prefix.items()):
         prefix_dir = os.path.join(out_dir, prefix)
         os.makedirs(prefix_dir, exist_ok=True)
 
-        per_file = []
+        per_file_all: List[Dict[str, Any]] = []
+        per_file_cov: List[Dict[str, Any]] = []
         totals_text_all = EvalTotals()
         totals_text_cov = EvalTotals()
+        totals_id_all = EvalTotals()
+        totals_id_cov = EvalTotals()
+        any_id_all = False
+        any_id_cov = False
 
-        for ont_i, category, pred_path in items:
+        for ont_i, category, pred_path in _progress(items, desc=f"評価: ファイル ({prefix})", disable=no_progress, unit="file"):
             gold_path = gold_map[(ont_i, category)]
             pred_with_ids_path = ""
             if pred_with_ids_dir:
@@ -859,27 +927,60 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
             totals_text_cov.fp += int(res_cov["text"]["fp"])
             totals_text_cov.fn += int(res_cov["text"]["fn"])
 
+            if res_all.get("id") is not None:
+                any_id_all = True
+                totals_id_all.tp += int(res_all["id"]["tp"])
+                totals_id_all.fp += int(res_all["id"]["fp"])
+                totals_id_all.fn += int(res_all["id"]["fn"])
+            if res_cov.get("id") is not None:
+                any_id_cov = True
+                totals_id_cov.tp += int(res_cov["id"]["tp"])
+                totals_id_cov.fp += int(res_cov["id"]["fp"])
+                totals_id_cov.fn += int(res_cov["id"]["fn"])
+
             pred_dirname = os.path.dirname(pred_path)
             prompt_log_guess = os.path.join(pred_dirname, os.path.basename(pred_path).replace("_extracted_triples.jsonl", "_prompt_log.jsonl"))
-            per_file.append(
-                {
-                    "ont_i": ont_i,
-                    "category": category,
-                    "pred_path": pred_path,
-                    "pred_with_ids_path": pred_with_ids_path,
-                    "gold_path": gold_path,
-                    "prompt_log_path": (prompt_log_guess if os.path.exists(prompt_log_guess) else ""),
-                    "all": res_all,
-                    "covered": res_cov,
-                }
-            )
+            meta = {
+                "ont_i": ont_i,
+                "category": category,
+                "pred_path": pred_path,
+                "pred_with_ids_path": pred_with_ids_path,
+                "gold_path": gold_path,
+                "prompt_log_path": (prompt_log_guess if os.path.exists(prompt_log_guess) else ""),
+            }
+            per_file_all.append({**meta, "eval": res_all})
+            per_file_cov.append({**meta, "eval": res_cov})
 
         p_all, r_all, f1_all = prf(totals_text_all.tp, totals_text_all.fp, totals_text_all.fn)
         p_cov, r_cov, f1_cov = prf(totals_text_cov.tp, totals_text_cov.fp, totals_text_cov.fn)
-        run_summary = {
+
+        micro_id_all = None
+        micro_id_cov = None
+        if any_id_all:
+            ip, ir, if1 = prf(totals_id_all.tp, totals_id_all.fp, totals_id_all.fn)
+            micro_id_all = {
+                "tp": totals_id_all.tp,
+                "fp": totals_id_all.fp,
+                "fn": totals_id_all.fn,
+                "precision": ip,
+                "recall": ir,
+                "f1": if1,
+            }
+        if any_id_cov:
+            ip, ir, if1 = prf(totals_id_cov.tp, totals_id_cov.fp, totals_id_cov.fn)
+            micro_id_cov = {
+                "tp": totals_id_cov.tp,
+                "fp": totals_id_cov.fp,
+                "fn": totals_id_cov.fn,
+                "precision": ip,
+                "recall": ir,
+                "f1": if1,
+            }
+
+        run_summary_all = {
             "prefix": prefix,
             "files": len(items),
-            "micro_text_all": {
+            "micro_text": {
                 "tp": totals_text_all.tp,
                 "fp": totals_text_all.fp,
                 "fn": totals_text_all.fn,
@@ -887,7 +988,13 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
                 "recall": r_all,
                 "f1": f1_all,
             },
-            "micro_text_covered": {
+            "micro_id": micro_id_all,
+            "per_file": per_file_all,
+        }
+        run_summary_cov = {
+            "prefix": prefix,
+            "files": len(items),
+            "micro_text": {
                 "tp": totals_text_cov.tp,
                 "fp": totals_text_cov.fp,
                 "fn": totals_text_cov.fn,
@@ -895,19 +1002,158 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
                 "recall": r_cov,
                 "f1": f1_cov,
             },
-            "per_file": per_file,
+            "micro_id": micro_id_cov,
+            "per_file": per_file_cov,
         }
-        write_json(os.path.join(prefix_dir, "summary.json"), run_summary)
+
+        summary_all_path = os.path.join(prefix_dir, "summary_all.json")
+        summary_cov_path = os.path.join(prefix_dir, "summary_covered.json")
+        write_json(summary_all_path, run_summary_all)
+        write_json(summary_cov_path, run_summary_cov)
+
+        tsv_header = [
+            "prefix",
+            "ont_i",
+            "category",
+            "tp",
+            "fp",
+            "fn",
+            "precision",
+            "recall",
+            "f1",
+            "id_tp",
+            "id_fp",
+            "id_fn",
+            "id_precision",
+            "id_recall",
+            "id_f1",
+            "pred_path",
+            "pred_with_ids_path",
+            "gold_path",
+            "prompt_log_path",
+        ]
+        tsv_rows_all: List[Dict[str, Any]] = [
+            {
+                "prefix": prefix,
+                "ont_i": "micro",
+                "category": "micro",
+                "tp": totals_text_all.tp,
+                "fp": totals_text_all.fp,
+                "fn": totals_text_all.fn,
+                "precision": p_all,
+                "recall": r_all,
+                "f1": f1_all,
+                "id_tp": (micro_id_all or {}).get("tp", ""),
+                "id_fp": (micro_id_all or {}).get("fp", ""),
+                "id_fn": (micro_id_all or {}).get("fn", ""),
+                "id_precision": (micro_id_all or {}).get("precision", ""),
+                "id_recall": (micro_id_all or {}).get("recall", ""),
+                "id_f1": (micro_id_all or {}).get("f1", ""),
+            }
+        ]
+        for r in per_file_all:
+            ev = r["eval"]
+            t = ev["text"]
+            tid = ev.get("id") or {}
+            tsv_rows_all.append(
+                {
+                    "prefix": prefix,
+                    "ont_i": r["ont_i"],
+                    "category": r["category"],
+                    "tp": t["tp"],
+                    "fp": t["fp"],
+                    "fn": t["fn"],
+                    "precision": t["precision"],
+                    "recall": t["recall"],
+                    "f1": t["f1"],
+                    "id_tp": tid.get("tp", ""),
+                    "id_fp": tid.get("fp", ""),
+                    "id_fn": tid.get("fn", ""),
+                    "id_precision": tid.get("precision", ""),
+                    "id_recall": tid.get("recall", ""),
+                    "id_f1": tid.get("f1", ""),
+                    "pred_path": r["pred_path"],
+                    "pred_with_ids_path": r["pred_with_ids_path"],
+                    "gold_path": r["gold_path"],
+                    "prompt_log_path": r["prompt_log_path"],
+                }
+            )
+
+        tsv_rows_cov: List[Dict[str, Any]] = [
+            {
+                "prefix": prefix,
+                "ont_i": "micro",
+                "category": "micro",
+                "tp": totals_text_cov.tp,
+                "fp": totals_text_cov.fp,
+                "fn": totals_text_cov.fn,
+                "precision": p_cov,
+                "recall": r_cov,
+                "f1": f1_cov,
+                "id_tp": (micro_id_cov or {}).get("tp", ""),
+                "id_fp": (micro_id_cov or {}).get("fp", ""),
+                "id_fn": (micro_id_cov or {}).get("fn", ""),
+                "id_precision": (micro_id_cov or {}).get("precision", ""),
+                "id_recall": (micro_id_cov or {}).get("recall", ""),
+                "id_f1": (micro_id_cov or {}).get("f1", ""),
+            }
+        ]
+        for r in per_file_cov:
+            ev = r["eval"]
+            t = ev["text"]
+            tid = ev.get("id") or {}
+            tsv_rows_cov.append(
+                {
+                    "prefix": prefix,
+                    "ont_i": r["ont_i"],
+                    "category": r["category"],
+                    "tp": t["tp"],
+                    "fp": t["fp"],
+                    "fn": t["fn"],
+                    "precision": t["precision"],
+                    "recall": t["recall"],
+                    "f1": t["f1"],
+                    "id_tp": tid.get("tp", ""),
+                    "id_fp": tid.get("fp", ""),
+                    "id_fn": tid.get("fn", ""),
+                    "id_precision": tid.get("precision", ""),
+                    "id_recall": tid.get("recall", ""),
+                    "id_f1": tid.get("f1", ""),
+                    "pred_path": r["pred_path"],
+                    "pred_with_ids_path": r["pred_with_ids_path"],
+                    "gold_path": r["gold_path"],
+                    "prompt_log_path": r["prompt_log_path"],
+                }
+            )
+
+        tsv_all_path = os.path.join(prefix_dir, "summary_all.tsv")
+        tsv_cov_path = os.path.join(prefix_dir, "summary_covered.tsv")
+        write_tsv(tsv_all_path, tsv_header, tsv_rows_all)
+        write_tsv(tsv_cov_path, tsv_header, tsv_rows_cov)
+
+        print(
+            f"micro ({prefix}) all: P={p_all:.4f} R={r_all:.4f} F1={f1_all:.4f} | "
+            f"covered: P={p_cov:.4f} R={r_cov:.4f} F1={f1_cov:.4f}"
+        )
         index["runs"][prefix] = {
-            "summary_path": os.path.join(prefix_dir, "summary.json"),
+            "summary_all_path": summary_all_path,
+            "summary_covered_path": summary_cov_path,
+            "tsv_all_path": tsv_all_path,
+            "tsv_covered_path": tsv_cov_path,
             "files": len(items),
         }
 
     write_json(os.path.join(out_dir, "index.json"), index)
     print(f"wrote: {os.path.join(out_dir, 'index.json')}")
     for prefix in sorted(index["runs"].keys()):
-        sp = index["runs"][prefix]["summary_path"]
-        print(f"summary ({prefix}): {sp}")
+        sp1 = index["runs"][prefix]["summary_all_path"]
+        sp2 = index["runs"][prefix]["summary_covered_path"]
+        tp1 = index["runs"][prefix]["tsv_all_path"]
+        tp2 = index["runs"][prefix]["tsv_covered_path"]
+        print(f"summary_all ({prefix}): {sp1}")
+        print(f"summary_covered ({prefix}): {sp2}")
+        print(f"tsv_all ({prefix}): {tp1}")
+        print(f"tsv_covered ({prefix}): {tp2}")
 
 
 def _parse_proxy_host(url: str) -> str:
@@ -971,123 +1217,85 @@ def cmd_check_wikidata(args: argparse.Namespace) -> None:
 # CLI
 # ----------------------------
 def build_arg_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(description="Local evaluation script (link-ids / eval / eval-covered)")
-    sub = ap.add_subparsers(dest="cmd", required=True)
-
-    # check-wikidata
-    ap0 = sub.add_parser("check-wikidata", help="Check whether Wikidata API is reachable with current proxy settings.")
-    ap0.add_argument(
-        "--user-agent",
-        default="MASA-eval-wikidata-linker/1.0 (contact: your_email@example.com)",
-        help="User-Agent for Wikidata API",
+    ap = argparse.ArgumentParser(
+        description="Wikidata ID付与 + 評価（全体/covered）を一括実行します。",
+        add_help=False,
+        formatter_class=JaRawTextHelpFormatter,
+        epilog=(
+            "例:\n"
+            "  python src/eval_wiki_id.py\n"
+            "  python src/eval_wiki_id.py --eval-tag run_001\n"
+            "  python src/eval_wiki_id.py --offline --eval-tag offline_run\n"
+            "  python src/eval_wiki_id.py --path-contains 20260207_070440__mode-default --only-prefix default\n"
+        ),
     )
-    ap0.set_defaults(func=cmd_check_wikidata)
+    _add_japanese_help(ap)
+    _set_help_titles(ap, positional="引数", optionals="オプション")
 
-    # Cell 1: link-ids (results tree)
-    ap1 = sub.add_parser("link-ids", help="Scan results tree and add Wikidata IDs to extracted_triples.")
-    ap1.add_argument("--results-dir", default=_guess_latest_results_dir(), help="Results directory to scan.")
-    ap1.add_argument("--eval-tag", default="auto", help="Tag name under eval/ (default: auto timestamp)")
-    ap1.add_argument("--out-dir", default=AUTO, help="Output directory (default: auto = <results-dir>/eval/<tag>)")
-    ap1.add_argument(
+    ap.add_argument(
+        "--results-dir",
+        default=_guess_latest_results_dir(),
+        help="results ディレクトリ（pred 探索の起点）。",
+    )
+    ap.add_argument("--eval-tag", default=AUTO, help="出力先 eval/ のタグ名（auto の場合はタイムスタンプ）。")
+    ap.add_argument("--out-dir", default=AUTO, help="出力ディレクトリ（auto の場合は <results-dir>/eval/<tag>）。")
+    ap.add_argument(
         "--pred-pattern",
         default=r"^(.+?)_ont_(\d+)_(.+?)_extract_target_extracted_triples\.jsonl$",
-        help="Regex for pred file names; must capture (prefix, ont_i, category).",
+        help="pred ファイル名の正規表現。(prefix, ont_i, category) をキャプチャしてください。",
     )
-    ap1.add_argument("--only-prefix", default="", help="If set, link only this prefix (e.g., default)")
-    ap1.add_argument("--path-contains", default="", help="If set, only scan directories containing this substring.")
-    ap1.add_argument("--endpoint", default="https://www.wikidata.org/w/api.php")
-    ap1.add_argument("--lang", default="ja")
-    ap1.add_argument("--fallback-lang", default="en")
-    ap1.add_argument(
-        "--user-agent",
-        default="MASA-eval-wikidata-linker/1.0 (contact: your_email@example.com)",
-        help="User-Agent for Wikidata API",
-    )
-    ap1.add_argument("--sleep-sec", type=float, default=0.2)
-    ap1.add_argument("--timeout-sec", type=int, default=30)
-    ap1.add_argument("--offline", action="store_true", help="Do not call Wikidata API; use cache only.")
-    ap1.set_defaults(func=cmd_link_ids)
+    ap.add_argument("--only-prefix", default="", help="指定した prefix（例: default）の pred のみ対象にします。")
+    ap.add_argument("--path-contains", default="", help="ディレクトリパスにこの文字列を含む場所だけ探索します。")
 
-    # Cell 2: eval
-    ap2 = sub.add_parser("eval", help="Evaluate gold vs pred (text + optional id).")
-    ap2.add_argument("--results-dir", default=_guess_latest_results_dir(), help="Results directory (used to auto-fill defaults).")
-    ap2.add_argument("--eval-tag", default="auto", help="Tag name under eval/ (default: auto timestamp)")
-    ap2.add_argument("--only-prefix", default="", help="If set, used for auto pred_dir guessing.")
-    ap2.add_argument("--path-contains", default="", help="If set, used for auto pred_dir guessing.")
-    gold_dir_default, gold_pat_default = _default_gold_source()
-    ap2.add_argument("--gold-dir", default=gold_dir_default)
-    ap2.add_argument("--pred-dir", default=AUTO, help="Directory containing pred jsonl files (default: auto).")
-    ap2.add_argument("--out-dir", default=AUTO, help="Output directory for summary.json (default: auto).")
-    ap2.add_argument(
-        "--gold-pattern",
-        default=gold_pat_default,
-        help="Regex for gold file names; must capture (ont_i, category).",
+    ap.add_argument(
+        "--gold-dir",
+        default=AUTO,
+        help="gold ディレクトリ（auto の場合は data/T2KGB_JA/gold_data を優先し、無ければ ground truth にフォールバック）。",
     )
-    ap2.add_argument(
-        "--pred-pattern",
-        default=r"^default_ont_(\d+)_(.+?)_with_ids\.jsonl$",
-        help="Regex for pred file names; must capture (ont_i, category). If you evaluate extracted_triples jsonl directly, override this.",
-    )
-    ap2.add_argument(
+    ap.add_argument("--gold-pattern", default=AUTO, help="gold ファイル名の正規表現（auto の場合は既定のパターン）。")
+    ap.add_argument(
         "--gold-field",
         default="verified_triples",
-        help="Field name used as gold triples (e.g., verified_triples / final_triples).",
+        help="gold レコード内で triple 配列が入るフィールド名（例: verified_triples / final_triples）。",
     )
-    ap2.set_defaults(func=lambda a: cmd_eval(a, covered_only=False))
-
-    # Cell 3: eval-covered
-    ap3 = sub.add_parser("eval-covered", help="Evaluate only records with non-empty pred extracted_triples.")
-    ap3.add_argument("--results-dir", default=_guess_latest_results_dir(), help="Results directory (used to auto-fill defaults).")
-    ap3.add_argument("--eval-tag", default="auto", help="Tag name under eval/ (default: auto timestamp)")
-    ap3.add_argument("--only-prefix", default="", help="If set, used for auto pred_dir guessing.")
-    ap3.add_argument("--path-contains", default="", help="If set, used for auto pred_dir guessing.")
-    ap3.add_argument("--gold-dir", default=gold_dir_default)
-    ap3.add_argument("--pred-dir", default=AUTO, help="Directory containing pred jsonl files (default: auto).")
-    ap3.add_argument("--out-dir", default=AUTO, help="Output directory for summary.json (default: auto).")
-    ap3.add_argument(
-        "--gold-pattern",
-        default=gold_pat_default,
-        help="Regex for gold file names; must capture (ont_i, category).",
-    )
-    ap3.add_argument(
-        "--pred-pattern",
-        default=r"^default_ont_(\d+)_(.+?)_with_ids\.jsonl$",
-        help="Regex for pred file names; must capture (ont_i, category).",
-    )
-    ap3.add_argument(
-        "--gold-field",
-        default="verified_triples",
-        help="Field name used as gold triples (e.g., verified_triples / final_triples).",
-    )
-    ap3.set_defaults(func=lambda a: cmd_eval(a, covered_only=True))
-
-    # eval-results (evaluate all processed ontologies under a results tree)
-    ap4 = sub.add_parser("eval-results", help="Evaluate all *_extracted_triples.jsonl under a results tree.")
-    ap4.add_argument("--results-dir", default=_guess_latest_results_dir(), help="Directory to scan (default: auto latest).")
-    ap4.add_argument("--out-dir", default=AUTO, help="Output directory (default: auto = <results-dir>/eval/<tag>)")
-    ap4.add_argument("--eval-tag", default="auto", help="Tag name under eval/ (default: auto timestamp)")
-    ap4.add_argument("--gold-dir", default=AUTO, help="Gold directory (default: auto = data/T2KGB_JA/gold_data or ground truth dir)")
-    ap4.add_argument("--gold-pattern", default=AUTO, help="Regex for gold file names (default: auto)")
-    ap4.add_argument("--gold-field", default="verified_triples", help="Gold triple field name (default: verified_triples)")
-    ap4.add_argument(
-        "--pred-pattern",
-        default=r"^(.+?)_ont_(\d+)_(.+?)_extract_target_extracted_triples\.jsonl$",
-        help="Regex for pred file names; must capture (prefix, ont_i, category).",
-    )
-    ap4.add_argument("--only-prefix", default="", help="If set, evaluate only this pred prefix (e.g., default)")
-    ap4.add_argument(
+    ap.add_argument(
         "--pred-with-ids-dir",
         default=AUTO,
-        help="If set, use <pred-with-ids-dir>/<prefix>_ont_{i}_{cat}_with_ids.jsonl for ID-based eval when available.",
+        help="ID評価用 with_ids のディレクトリ。auto の場合は <out_dir>/with_ids があればそれを使います。",
     )
-    ap4.add_argument(
-        "--path-contains",
-        default="",
-        help="If set, only scan directories whose path contains this substring (e.g., '20260207_070440__mode-default').",
+
+    ap.add_argument("--endpoint", default="https://www.wikidata.org/w/api.php", help="Wikidata API のエンドポイント。")
+    ap.add_argument("--lang", default="ja", help="検索に使う言語（wbsearchentities の language）。")
+    ap.add_argument("--fallback-lang", default="en", help="見つからない場合のフォールバック言語。空なら無効。")
+    ap.add_argument(
+        "--user-agent",
+        default="MASA-eval-wikidata-linker/1.0 (contact: your_email@example.com)",
+        help="Wikidata API に送る User-Agent 文字列（運用時は連絡先入りを推奨）",
     )
-    ap4.set_defaults(func=cmd_eval_results)
+    ap.add_argument("--sleep-sec", type=float, default=0.2, help="API 呼び出し間の sleep 秒。")
+    ap.add_argument("--timeout-sec", type=int, default=30, help="API リクエストのタイムアウト秒。")
+    ap.add_argument("--offline", action="store_true", help="Wikidata API を呼ばず、キャッシュのみで解決します。")
+    ap.add_argument("--no-progress", action="store_true", help="進捗バー（tqdm）を表示しません。")
 
     return ap
+
+
+def cmd_all(args: argparse.Namespace) -> None:
+    results_dir = args.results_dir or _guess_latest_results_dir()
+    if not os.path.isdir(results_dir):
+        raise SystemExit(f"results_dir not found: {results_dir}")
+    args.results_dir = results_dir
+
+    out_dir = _default_eval_root(results_dir, args.eval_tag) if _is_auto(args.out_dir) else args.out_dir
+    args.out_dir = out_dir
+    os.makedirs(out_dir, exist_ok=True)
+    print(f"out_dir: {out_dir}")
+
+    print("== 1) ID付与 (link-ids)")
+    cmd_link_ids(args)
+
+    print("== 2) 評価 (all / covered)")
+    cmd_eval_results(args)
 
 
 def main() -> None:
@@ -1106,7 +1314,7 @@ def main() -> None:
     )
     ap = build_arg_parser()
     args = ap.parse_args()
-    args.func(args)
+    cmd_all(args)
 
 
 if __name__ == "__main__":

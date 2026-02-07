@@ -23,17 +23,30 @@ except Exception:  # pragma: no cover
     requests = None  # type: ignore
 
 
+class JaHelpFormatter(argparse.HelpFormatter):
+    def add_usage(self, usage, actions, groups, prefix=None):
+        if prefix is None:
+            prefix = "使い方: "
+        return super().add_usage(usage, actions, groups, prefix)
+
+
 def parse_args() -> argparse.Namespace:
-    ap = argparse.ArgumentParser(description="Check connectivity to Wikidata API.")
-    ap.add_argument("--endpoint", default="https://www.wikidata.org/w/api.php")
-    ap.add_argument("--lang", default="ja")
-    ap.add_argument("--search", default="東京")
+    ap = argparse.ArgumentParser(
+        description="Wikidata API に疎通できるかを確認します（DNS/HTTP + 簡易検索）。",
+        add_help=False,
+        formatter_class=JaHelpFormatter,
+    )
+    ap.add_argument("-h", "--help", action="help", help="このヘルプを表示して終了します。")
+    ap._optionals.title = "オプション"  # type: ignore[attr-defined]
+    ap.add_argument("--endpoint", default="https://www.wikidata.org/w/api.php", help="Wikidata API のエンドポイント。")
+    ap.add_argument("--lang", default="ja", help="検索に使う言語（wbsearchentities の language）。")
+    ap.add_argument("--search", default="東京", help="疎通確認用に検索する文字列。")
     ap.add_argument(
         "--user-agent",
         default="Wikidata-Connectivity-Check/1.0 (contact: you@example.com)",
-        help="User-Agent for Wikidata API",
+        help="Wikidata API に送る User-Agent 文字列（運用時は連絡先入りを推奨）",
     )
-    ap.add_argument("--timeout-sec", type=int, default=10)
+    ap.add_argument("--timeout-sec", type=int, default=10, help="HTTP リクエストのタイムアウト秒。")
     return ap.parse_args()
 
 
