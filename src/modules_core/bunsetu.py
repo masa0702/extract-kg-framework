@@ -153,6 +153,8 @@ def _split_span_by_connectors(span, doc):
     """
     boundaries = []           # 接続語の直後インデックスを格納
     for i, tok in enumerate(span):
+        if tok.text in {"、", "。"}:
+            boundaries.append(tok.i + 1)
         if tok.text in CONNECTIVES_PARALLEL and tok.pos_ in {"NOUN", "CCONJ", "SYM"}:
             if 0 < i < len(span)-1 and _is_nominal(span[i-1]) and _is_nominal(span[i+1]):
                 boundaries.append(tok.i + 1)
@@ -160,14 +162,26 @@ def _split_span_by_connectors(span, doc):
     if not boundaries:          # 分割不要
         return [span]
 
+    # Safety: remove duplicates and ignore boundaries that create empty spans.
+    boundaries = sorted({b for b in boundaries if span.start < b < span.end})
+    if not boundaries:
+        return [span]
+
     # boundaries を使って細切れ Spans を作成
     start = span.start
     pieces = []
     for b in boundaries:
-        pieces.append(doc[start:b])  # b は token.i+1 なので直後まで含む
+        if b <= start:
+            continue
+        piece = doc[start:b]  # b は token.i+1 なので直後まで含む
+        if len(piece) > 0:
+            pieces.append(piece)
         start = b
-    pieces.append(doc[start:span.end])  # 残り
-    return pieces
+    if start < span.end:
+        tail = doc[start:span.end]  # 残り
+        if len(tail) > 0:
+            pieces.append(tail)
+    return pieces if pieces else [span]
 
 def _merge_brackets_and_particle(spans, bracket_pairs=BRACKETS):
     """
@@ -395,6 +409,7 @@ class BunsetsuSegmenter:
         refined = []
         for sp in spans:
             refined.extend(_split_span_by_connectors(sp, doc))
+        refined = [sp for sp in refined if len(sp) > 0]
 
         # 4. 出力整形
         bunsetsu_list = [

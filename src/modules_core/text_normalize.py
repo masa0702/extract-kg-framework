@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable, Sequence
 
 
@@ -81,9 +82,30 @@ def strip_trailing_particles(
     if not s:
         return ""
 
-    # Post-process: remove half-width spaces in specific tokens.
+    # Post-process: remove half-width spaces in specific tokens/patterns.
     s = s.replace(" 's", "'s")
     s = s.replace(" : ", ": ")
+    s = s.replace(" / ", "/")
+    s = re.sub(r" ([!.'])", r"\1", s)
+    s = re.sub(r" , ", r", ", s)
+    s = re.sub(r" ' (?=\\w)", " '", s)
+    s = re.sub(r"(?<!\\s)'\\s+(?=\\w)", "'", s)
+
+    # If quote brackets exist, keep only inside.
+    if "「" in s:
+        s = s.split("「", 1)[1]
+    if "」" in s:
+        s = s.split("」", 1)[0]
+    s = _rstrip_any(s, _TRAILING_PUNCT_CHARS)
+    if not s:
+        return ""
+
+    # Drop trailing polite copula.
+    if s.endswith("です"):
+        s = s[: -len("です")]
+        s = _rstrip_any(s, _TRAILING_PUNCT_CHARS)
+        if not s:
+            return ""
 
     # If full-width parenthesis exists, drop everything after it.
     paren_pos = s.find("（")
@@ -93,7 +115,7 @@ def strip_trailing_particles(
         if not s:
             return ""
 
-    # If bunsetsu info is available, remove trailing particles by POS tags.
+    # If bunsetsu info is available, remove trailing function words by POS tags.
     # This is more reliable than a static particle list.
     if clause and len(clause) >= 5:
         tokens = list(clause[2] or [])
@@ -104,7 +126,7 @@ def strip_trailing_particles(
             token = str(tokens[i]) if i < len(tokens) else ""
             upos = str(upos_list[i]) if i < len(upos_list) else ""
             xpos = str(xpos_list[i]) if i < len(xpos_list) else ""
-            if _is_particle_token(token, upos, xpos):
+            if _is_particle_token(token, upos, xpos) or upos == "AUX" or (xpos and "助動詞" in xpos):
                 if len(s) > len(token) and s.endswith(token):
                     s = s[: -len(token)]
                     s = _rstrip_any(s, _TRAILING_PUNCT_CHARS)
@@ -112,6 +134,16 @@ def strip_trailing_particles(
                     i -= 1
                     continue
             break
+        # Drop trailing quote-like "と + VERB" (e.g., "という", "といっ")
+        if len(tokens) >= 2:
+            last_upos = str(upos_list[-1]) if len(upos_list) >= 1 else ""
+            prev_upos = str(upos_list[-2]) if len(upos_list) >= 2 else ""
+            prev_tok = str(tokens[-2]) if len(tokens) >= 2 else ""
+            if last_upos == "VERB" and prev_upos == "ADP" and prev_tok == "と":
+                s = s[: -len(tokens[-1]) - len(tokens[-2])]
+                s = _rstrip_any(s, _TRAILING_PUNCT_CHARS)
+                if not s:
+                    return ""
         return s
 
     # Fallback: Common Japanese particles (strip only trailing; internal "の" stays intact).

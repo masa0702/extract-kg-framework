@@ -65,7 +65,7 @@ INPUT_JSONL_DIR_DEFAULT = os.getenv(
 )
 RESULTS_ROOT_DEFAULT = os.getenv(
     "RESULTS_ROOT",
-    os.path.join(REPO_ROOT, "results/ver7.0/extract_pred_arg_pair"),
+    os.path.join(REPO_ROOT, "results/ver10.0/extract_pred_arg_pair"),
 )
 
 PROMPTS_JSON = os.getenv("PROMPTS_JSON", os.path.join(REPO_ROOT, "prompts/prompts.json"))
