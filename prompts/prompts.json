@@ -99,7 +99,7 @@
       "id": "15",
       "prompt_name": "フレーム役割チェック",
       "description": "relation を「事象フレーム」と見なし、主語/目的語がそのフレームの **必須役割（argument）**を満たすかを判定する。",
-      "prompt_text": "あなたは「フレーム役割（ロール）整合の2値判定器」です。\n入力は relation と、指定された side における argument と concept です。\n重要: subject/object や主語/目的語という概念は使わないでください。\nこのモジュールは方向を推定せず、side固定で判定します。\n\n入力:\n- relation: {relation_ja}\n- side: {side} \n- concept: {concept_ja}\n- argument: {argument}\n- other_argument: {other_argument}   # 無ければ \"NULL\"\n- context_sentence: {context_sentence}\n\n手順:\n1) relation が喚起するフレーム（イベント/状況）を短く命名する（frame）。\n2) side={side} に対応する必須役割名（role_name）を短く1つ定義する（例:「作品」「人物」「組織」「参加者」など）。\n3) argument と other_argument（NULLなら省略）を含む短い関係文Aを1文で作る。\n4) Aの意味を保ったまま、argument が concept={concept_ja} に属する役割フィラーとして自然に成立することが読み取れる言い換えA'を1文で作る。\n5) 判定は A が A' を含意するか（A ⇒ A'）で行う。\n   - 含意するなら verdict=1\n   - 含意しない、または判断不能なら verdict=0\n6) 出力は必ず次のJSON形式のみ。\n出力(JSONのみ):\n{\"verdict\": 0 or 1}\n"
+      "prompt_text": "あなたは「フレーム役割（ロール）整合の厳密2値判定器」です。\n入力は relation と、指定された side における argument と concept です。\n重要: subject/object や主語/目的語という概念は使わないでください。\nこのモジュールは方向を推定せず、side固定で判定します。\n\n判定方針（精度優先）:\n- concept はオントロジー上の型（クラス）。argument はその型の「インスタンス（個体/実体/値）」として適格かを判定する。\n- argument が文の断片・活用語尾つき・助詞つき・役割語そのもの等で、個体/値として成立しない場合は必ず verdict=0。\n- 判断不能は必ず verdict=0。\n\n入力:\n- relation: {relation_ja}\n- side: {side}\n- concept: {concept_ja}\n- argument: {argument}\n- other_argument: {other_argument}   # 無ければ \"NULL\"\n- context_sentence: {context_sentence}\n\n手順:\n1) 文脈優先: context_sentence があれば最優先で参照し、この文脈で argument が何を指すかを解釈する。\n2) 個体性フィルタ（最重要）: 次のいずれかなら verdict=0 とする。\n   - 文の断片/活用/助詞付き: 「〜で」「〜に」「〜を」「監督し」「アニメで」など\n   - 役割語/関係語そのもの: 「監督」「出演者」「脚本」「制作会社」など（特定の固有名ではない）\n   - concept と同一/ほぼ同一で、個体名（固有名・実体名）ではない\n3) relation が喚起するフレーム（イベント/状況）を短く命名する（frame）。\n4) side={side} に対応する必須役割名（role_name）を短く1つ定義する（concept と整合する語にする）。\n5) argument と other_argument（NULLなら省略）を含む短い関係文Aを日本語1文で作る（意味は変えない）。\n6) 「診断的特性」を使った言い換え: concept={concept_ja} の診断的特性（その型らしさを示し、混同しやすい非該当例を排除できる性質）を1つ選ぶ。\n   A の意味を保ちつつ、argument が concept の個体として成立し、その診断的特性を満たすことが読み取れる言い換え文 A' を日本語1文で作る。\n7) 判定: A が A' を含意する（A ⇒ A'）なら verdict=1。含意しない/不明なら verdict=0。\n8) 出力は必ず次のJSON形式のみ。\n出力(JSONのみ):\n{\"verdict\": 0 or 1}\n"
 ,
       "argument_elements": [
         {
@@ -121,6 +121,38 @@
         {
           "name": "relation_ja",
           "description": ""
+        },
+        {
+          "name": "side",
+          "description": "domain or range：外部で固定"
+        }
+      ]
+    },
+    {
+      "id": "22",
+      "prompt_name": "QA型（通常文↔疑問文）型整合チェック",
+      "description": "通常文→疑問文（はい/いいえ）へ言い換え、YES/NOで型（domain/range concept）の個体適格性を厳密に二値化する。",
+      "prompt_text": "あなたは「通常文↔疑問文(QA)による型整合の2値判定器」です。\n入力は relation と、指定された side における argument と concept です。\n重要: subject/object や主語/目的語という概念は使わないでください。\nこのモジュールは方向を推定せず、side固定で判定します。\n\n判定方針（精度優先）:\n- まず通常文Sを作り、次に同内容の疑問文Qに変換し、QにYES/NOで答える（頭の中で）。\n- YESのときのみ verdict=1。NO/UNKNOWN（判断不能）は verdict=0。\n\n入力:\n- relation: {relation_ja}\n- side: {side}\n- concept: {concept_ja}\n- argument: {argument}\n- other_argument: {other_argument}   # 無ければ \"NULL\"\n- context_sentence: {context_sentence}\n\n手順:\n1) 通常文S（日本語1文）を作る。\n   Sは「この文脈で argument は concept の“個体（実体/値）”を指す」という意味を必ず含める。\n2) Sを、意味を変えずに疑問文Q（はい/いいえで答えられる形、日本語1文）に変換する。\n3) context_sentence と一般常識に基づき、Qへの答えを YES/NO/UNKNOWN で決める（頭の中で）。\n   - 注意: 「監督」「制作会社」などの役割語・一般名詞は、通常は特定の個体名ではないため YES にしない。\n   - 「〜で」「〜し」などの断片も YES にしない。\n4) answer=YES のときのみ verdict=1。それ以外は verdict=0。\n5) 出力は必ず次のJSON形式のみ。\n出力(JSONのみ):\n{\"verdict\": 0 or 1}\n",
+      "argument_elements": [
+        {
+          "name": "argument",
+          "description": "判定対象の項"
+        },
+        {
+          "name": "concept_ja",
+          "description": "sideに対応する概念"
+        },
+        {
+          "name": "context_sentence",
+          "description": "任意だが推奨"
+        },
+        {
+          "name": "other_argument",
+          "description": "無ければ \"NULL\""
+        },
+        {
+          "name": "relation_ja",
+          "description": "述語（日本語）"
         },
         {
           "name": "side",
@@ -159,15 +191,11 @@
     },
     {
       "id": "21",
-      "prompt_name": "同義語・言い換えベース判定モジュール",
-      "description": "（llm-jpで）制約付きで A→A'（言い換え）を生成し、 （BERTで）BERT(A,A')→{same/not} の 二値判定器へ置換可能な形に落とす。",
-      "prompt_text": "あなたは「同義語・言い換えに基づくオントロジー整合の2値判定器」です。\n入力は relation と、指定された side における argument と concept です。\n重要: subject/object や主語/目的語という概念は使わないでください。\nこのモジュールは方向を推定せず、side固定で判定します。\n\n入力:\n- relation: {relation_ja}\n- side: {side}\n- concept: {concept_ja}\n- argument: {argument}\n- other_argument: {other_argument}   # 無ければ \"NULL\"\n- context_sentence: {context_sentence}\n\n制約:\n- A と A' はそれぞれ日本語1文のみ（長文禁止）。\n- A' には concept={concept_ja} をそのまま含める（概念制約を明示する）。\n- 判断不能は必ず verdict=0。\n\n手順:\n1) relation を用いて、argument と other_argument（NULLなら省略）を含む短い関係文 A を1文で作る。\n   必要なら同義語・言い換えを使ってよいが、意味は変えない。\n2) A の意味を保ったまま、side={side} の argument が concept={concept_ja} に属することが自然に読み取れる\n   「概念制約付き言い換え」A' を1文で作る。A' には concept={concept_ja} を必ず含める。\n3) 判定は A が A' を含意するか（A ⇒ A'）で行う。\n   - 含意するなら verdict=1\n   - 含意しない、または判断不能なら verdict=0\n4) 出力は必ず次のJSON形式のみ。\n\n出力(JSONのみ):\n{\"verdict\": 0 or 1}\n"
+      "prompt_name": "言い換え＋文脈解釈による型整合（改訂）",
+      "description": "relation の解釈と文脈に基づき、side固定で argument が concept の個体（実体/値）として成立するかを直接 0/1 判定する（含意A⇒A'は使わない）。",
+      "prompt_text": "あなたは「言い換え＋文脈解釈による型整合の2値判定器（No.21 改訂版）」です。\n入力は relation と、指定された side における argument と concept です。\n重要: subject/object や主語/目的語という概念は使わないでください。\nこのモジュールは方向を推定せず、side固定で判定します。\n\n入力:\n- relation: {relation_ja}\n- side: {side}                # \"domain\" または \"range\"\n- concept: {concept_ja}\n- argument: {argument}\n- other_argument: {other_argument}   # 無ければ \"NULL\"\n- context_sentence: {context_sentence}\n\n判定方針（バランス重視）:\n- context_sentence があれば最優先で参照し、この文脈で argument が何を指すかを解釈する。\n- other_argument は補助情報として扱い、argument の役割（作品名/人物名/場所/賞/国/日付など）推定に使う。\n- 次の「個体性NG」に該当する場合は必ず verdict=0:\n  - 文の断片/活用語尾つき/助詞つき: 「〜で」「〜に」「〜を」「監督し」「アニメで」「〜という」など\n  - 役割語/関係語そのもの: 「監督」「出演者」「脚本」「制作会社」「登場人物」「本国」など（固有の個体名ではない）\n  - 記号だけ/空文字/曖昧すぎる一般語（「一部」「続く」など）\n- 迷ったら verdict=0（ただし上の否定例で先に落とす）。\n\n手順:\n1) relation と side の文脈で、argument が concept の個体（実体/値）として成立するかを判定する。\n2) YES の場合のみ verdict=1。NO/UNKNOWN（判断不能）は verdict=0。\n\n補助（判断アンカー）:\n- relation が「物語の舞台」「撮影地」「本国」の場合、range は通常「都市/国/場所の固有名」になりやすい。\n- relation が「登場人物」の場合、range は通常「人物名/キャラクター名」になりやすい。\n- relation が「受賞」「ノミネート」の場合、range は通常「賞（固有名または賞カテゴリ）」になりやすい。\n\n出力(JSONのみ):\n{\"verdict\": 0 or 1}\n"
 ,
       "argument_elements": [
-        {
-          "name": "A_prime",
-          "description": ""
-        },
         {
           "name": "argument",
           "description": ""
@@ -191,6 +219,105 @@
         {
           "name": "side",
           "description": "domain または range（外部から固定で渡す。プロンプト内で判断しない）"
+        }
+      ]
+    },
+    {
+      "id": "23",
+      "prompt_name": "関係含意＋型整合（方向も同時に判定）",
+      "description": "context_sentence が relation を述べているか（関係含意）と、domain/range の型整合を同時に判定し、(arg1,arg2) の方向も 0/1/2 で返す。",
+      "prompt_text": "あなたは「関係方向の 3 値判定器（No.23）」です。\n与えられた文が、arg1 と arg2 の間に relation を述べているか（関係含意）を判定してください。\n\n入力:\n- relation: {relation_ja}\n- relation_signature (参考): {relation_ja}({domain_concept_ja}, {range_concept_ja})\n- arg1: {arg1}\n- arg2: {arg2}\n- context_sentence: {context_sentence}\n\n重要:\n- 日本語では目的語/主語が省略されることがある。\n  - 文全体の主題が arg1（例: \"{arg1}は...\"）で、後半に「{arg2} が {relation_ja} し/務め/担当」などが出る場合、arg2 の対象は arg1 とみなしてよい。\n  - 逆に主題が arg2 で同様なら case2。\n\n判定ルール:\n- relation が arg1 と arg2 の関係として述べられている場合のみ 1/2。\n- 単なる共起、判断不能、arg が役割語/一般語/断片（例: \"監督\" \"著者\" \"出演者\" \"制作会社\" など）なら 0。\n\n出力:\n- case1: arg1 が domain 側で arg2 が range 側なら verdict=1\n- case2: arg2 が domain 側で arg1 が range 側なら verdict=2\n- どちらでもない/判断不能なら verdict=0\n\n出力(JSONのみ):\n{\"verdict\": 0 or 1 or 2}\n"
+,
+      "argument_elements": [
+        {
+          "name": "relation_ja",
+          "description": "述語（日本語）"
+        },
+        {
+          "name": "domain_concept_ja",
+          "description": "domain 側の concept 名（日本語）"
+        },
+        {
+          "name": "range_concept_ja",
+          "description": "range 側の concept 名（日本語）"
+        },
+        {
+          "name": "arg1",
+          "description": "項1（domain/range は未確定）"
+        },
+        {
+          "name": "arg2",
+          "description": "項2（domain/range は未確定）"
+        },
+        {
+          "name": "context_sentence",
+          "description": "元文（推奨）"
+        }
+      ]
+    },
+    {
+      "id": "24",
+      "prompt_name": "関係含意＋型整合（厳密・方向判定）",
+      "description": "context_sentence が relation を述べているか（関係含意）と、domain/range の型整合を同時に確認し、(arg1,arg2) の方向を 0/1/2 で返す（精度優先）。",
+      "prompt_text": "あなたは「関係方向の 3 値判定器（No.24）」です。\narg1/arg2 のどちらが domain 側・range 側かを判定し、さらに文がその relation を述べているときだけ採択してください。\n\n入力:\n- relation: {relation_ja}\n- domain_concept: {domain_concept_ja}\n- range_concept: {range_concept_ja}\n- arg1: {arg1}\n- arg2: {arg2}\n- context_sentence: {context_sentence}\n\n重要:\n- 日本語では目的語/主語が省略されることがある。\n  - 文全体の主題が arg1（例: \"{arg1}は...\"）で、後半に「{arg2} が {relation_ja} し/務め/担当」などが出る場合、arg2 の対象は arg1 とみなしてよい（case1）。\n  - 逆に主題が arg2 で同様なら case2。\n\n判定ルール:\n- 方向は concept を手がかりに決める。\n  - case1候補: arg1 が domain_concept の個体として自然、arg2 が range_concept の個体として自然\n  - case2候補: arg2 が domain_concept の個体として自然、arg1 が range_concept の個体として自然\n- 候補方向が決まっても、文がその 2 つの間の relation を述べていないなら 0。\n- 単なる共起、判断不能、arg が役割語/一般語/断片（例: \"監督\" \"著者\" \"出演者\" \"制作会社\" など）なら 0。\n\n出力:\n- case1: (domain=arg1, range=arg2) かつ 文がそれを述べる → verdict=1\n- case2: (domain=arg2, range=arg1) かつ 文がそれを述べる → verdict=2\n- どちらでもない/判断不能 → verdict=0\n\n出力(JSONのみ):\n{\"verdict\": 0 or 1 or 2}\n"
+,
+      "argument_elements": [
+        {
+          "name": "relation_ja",
+          "description": "述語（日本語）"
+        },
+        {
+          "name": "domain_concept_ja",
+          "description": "domain 側の concept 名（日本語ラベル）"
+        },
+        {
+          "name": "range_concept_ja",
+          "description": "range 側の concept 名（日本語ラベル）"
+        },
+        {
+          "name": "arg1",
+          "description": "項1（domain/range は未確定）"
+        },
+        {
+          "name": "arg2",
+          "description": "項2（domain/range は未確定）"
+        },
+        {
+          "name": "context_sentence",
+          "description": "元文（推奨）"
+        }
+      ]
+    },
+    {
+      "id": "25",
+      "prompt_name": "関係含意チェック（方向固定・二値）",
+      "description": "domain=arg1, range=arg2 として、文がその relation を述べているか（関係含意）を 0/1 で返す。",
+      "prompt_text": "あなたは「関係含意の二値判定器（No.25）」です。\n次の文が、次の内容を述べているなら verdict=1、述べていない/判断不能なら verdict=0。\n\n判定する内容:\n「{arg1} の {relation_ja} は {arg2} である」\n\n文:\n{context_sentence}\n\nヒント:\n- 日本語では目的語/主語が省略されることがある。\n  - 文全体の主題が {arg1} で、後半に「{arg2} が {relation_ja} し/務め/担当」などが出る場合も verdict=1 としてよい。\n- relation_ja に応じた代表的な言い換えも同一とみなしてよい（例）:\n  - 著者: \"著\" \"作者\" \"作\" \"〜による\"\n  - 続く/次: \"続編\" \"次作\" \"第N作\" \"後継\" \"〜の次\" \"〜の続編\"\n  - 物語の舞台: \"舞台\" \"設定\" \"〜を舞台に\" \"〜が舞台\"\n- 共起だけ、判断不能は verdict=0。\n\n出力(JSONのみ):\n{\"verdict\": 0 or 1}\n"
+,
+      "argument_elements": [
+        {
+          "name": "relation_ja",
+          "description": "述語（日本語）"
+        },
+        {
+          "name": "domain_concept_ja",
+          "description": "domain 側の concept 名（日本語ラベル）"
+        },
+        {
+          "name": "range_concept_ja",
+          "description": "range 側の concept 名（日本語ラベル）"
+        },
+        {
+          "name": "arg1",
+          "description": "domain 側の項"
+        },
+        {
+          "name": "arg2",
+          "description": "range 側の項"
+        },
+        {
+          "name": "context_sentence",
+          "description": "元文（推奨）"
         }
       ]
     }

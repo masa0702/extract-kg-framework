@@ -57,6 +57,7 @@ from modules_core.ontology_verify import (
     normalize_text,
     load_ontology_relation_aliases,
 )
+from modules_core.prompt_monitor import write_prompt_accept_summary
 from modules_core.text_normalize import strip_trailing_particles
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -805,39 +806,41 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                                         "skipped_duplicate": True,
                                     })
                                 continue
-                            seen_prompt_calls.add(call_key)
+                                seen_prompt_calls.add(call_key)
 
-                            prompt_text = render_prompt(
-                                prompt,
-                                {
+                                prompt_text = render_prompt(
+                                    prompt,
+                                    {
+                                        "relation_ja": rel_canon,
+                                        "domain_concept_ja": domain_concept,
+                                        "range_concept_ja": range_concept,
+                                        "arg1": arg1,
+                                        "arg2": arg2,
+                                        "context_sentence": sentence,
+                                    },
+                                )
+                                verdict = ontology_judge.judge_prompt(prompt_text)
+                                _m = getattr(ontology_judge, "last_meta", {}) or {}
+                                _e = getattr(ontology_judge, "last_error", None)
+                                _row = {
+                                    "id": sent_id,
                                     "relation_ja": rel_canon,
-                                    "domain_concept_ja": domain_concept,
-                                    "range_concept_ja": range_concept,
+                                    "relation_raw": rel_raw,
+                                    "ontology_id": ontology_id,
+                                    "prompt_id": prompt_id,
+                                    "prompt_name": prompt_name,
+                                    "mode": "pair",
                                     "arg1": arg1,
                                     "arg2": arg2,
-                                    "context_sentence": sentence,
-                                },
-                            )
-                            verdict = ontology_judge.judge_prompt(prompt_text)
-                            _m = getattr(ontology_judge, "last_meta", {}) or {}
-                            _e = getattr(ontology_judge, "last_error", None)
-                            _row = {
-                                "id": sent_id,
-                                "relation_ja": rel_canon,
-                                "relation_raw": rel_raw,
-                                "ontology_id": ontology_id,
-                                "prompt_id": prompt_id,
-                                "prompt_name": prompt_name,
-                                "mode": "pair",
-                                "arg1": arg1,
-                                "arg2": arg2,
-                                "verdict": verdict,
-                                "prompt_text": prompt_text,
-                                "cached": _m.get("cached"),
-                                "model_used": _m.get("model_used"),
-                                "base_url": _m.get("base_url"),
-                                "request_url": _m.get("request_url"),
-                            }
+                                    "verdict": verdict,
+                                    "prompt_text": prompt_text,
+                                    "cached": _m.get("cached"),
+                                    "model_used": _m.get("model_used"),
+                                    "temperature": _m.get("temperature"),
+                                    "max_tokens": _m.get("max_tokens"),
+                                    "base_url": _m.get("base_url"),
+                                    "request_url": _m.get("request_url"),
+                                }
                             if _e:
                                 _row["error"] = _e
                             prompt_logs.append(_row)
@@ -887,63 +890,146 @@ def cpu_child_worker(payload, ast_dict, conn: Connection):
                             continue
                         if not domain_concept or not range_concept:
                             continue
+                        prompt_side_verdict_cache: Dict[Tuple[str, str, str, str, str], int] = {}
 
                         def _judge_side(side: str, concept: str, argument: str, other_argument: str) -> int:
-                            oa = other_argument or "NULL"
-                            call_key = (ontology_id, rel_canon, prompt_id, side, argument, oa)
-                            if call_key in seen_prompt_calls:
-                                if log_dup_skips:
-                                    prompt_logs.append({
-                                        "id": sent_id,
+                                oa = other_argument if other_argument else pick_other_argument(x_values, argument)
+                                call_key = (ontology_id, rel_canon, prompt_id, side, argument)
+                                if call_key in prompt_side_verdict_cache:
+                                    if log_dup_skips:
+                                        prompt_logs.append(
+                                            {
+                                                "id": sent_id,
+                                                "relation_ja": rel_canon,
+                                                "relation_raw": rel_raw,
+                                                "ontology_id": ontology_id,
+                                                "prompt_id": prompt_id,
+                                                "prompt_name": prompt_name,
+                                                "mode": side,
+                                                "argument": argument,
+                                                "other_argument": oa,
+                                                "verdict": prompt_side_verdict_cache.get(call_key),
+                                                "skipped_duplicate": True,
+                                            }
+                                        )
+                                    return int(prompt_side_verdict_cache.get(call_key, 0))
+
+                                prompt_text = render_prompt(
+                                    prompt,
+                                    {
                                         "relation_ja": rel_canon,
-                                        "relation_raw": rel_raw,
-                                        "ontology_id": ontology_id,
-                                        "prompt_id": prompt_id,
-                                        "prompt_name": prompt_name,
-                                        "mode": side,
+                                        "side": side,
+                                        "concept_ja": concept,
                                         "argument": argument,
                                         "other_argument": oa,
-                                        "verdict": None,
-                                        "skipped_duplicate": True,
-                                    })
-                                return 0
-                            seen_prompt_calls.add(call_key)
+                                        "context_sentence": sentence,
+                                    },
+                                )
+                                try:
+                                    t_override = None
+                                    mt_override = None
+                                    if str(prompt_id) == "21":
+                                        try:
+                                            t_override = float(os.getenv("PROMPT21_TEMPERATURE", "0.15"))
+                                        except Exception:
+                                            t_override = 0.15
+                                        try:
+                                            s_mt = os.getenv("PROMPT21_MAX_TOKENS", "").strip()
+                                            mt_override = int(s_mt) if s_mt else None
+                                        except Exception:
+                                            mt_override = None
+                                    v = ontology_judge.judge_prompt(prompt_text, temperature=t_override, max_tokens=mt_override)
+                                except Exception as e:
+                                    raise RuntimeError(
+                                        f"ontology verify failed: id={sent_id!r} prompt_id={prompt_id!r} side={side!r} error={e}"
+                                    ) from e
+                                meta = getattr(ontology_judge, "last_meta", {}) or {}
+                                err = getattr(ontology_judge, "last_error", None)
 
-                            prompt_text = render_prompt(
-                                prompt,
-                                {
+                                final_v = int(v)
+                                fallback_used = False
+                                fallback_verdict = None
+                                if str(prompt_id) == "21" and final_v == 0:
+                                    prompt_fb = ontology_resolver.get_prompt("22")
+                                    if prompt_fb:
+                                        prompt_text_fb = render_prompt(
+                                            prompt_fb,
+                                            {
+                                                "relation_ja": rel_canon,
+                                                "side": side,
+                                                "concept_ja": concept,
+                                                "argument": argument,
+                                                "other_argument": oa,
+                                                "context_sentence": sentence,
+                                            },
+                                        )
+                                        try:
+                                            v_fb = ontology_judge.judge_prompt(prompt_text_fb, temperature=0.0)
+                                        except Exception as e:
+                                            raise RuntimeError(
+                                                f"ontology verify failed (fallback): id={sent_id!r} prompt_id='22' side={side!r} error={e}"
+                                            ) from e
+                                        meta_fb = getattr(ontology_judge, "last_meta", {}) or {}
+                                        err_fb = getattr(ontology_judge, "last_error", None)
+                                        row_log_fb: Dict[str, Any] = {
+                                            "id": sent_id,
+                                            "relation_ja": rel_canon,
+                                            "relation_raw": rel_raw,
+                                            "ontology_id": ontology_id,
+                                            "prompt_id": "22",
+                                            "prompt_name": getattr(prompt_fb, "prompt_name", ""),
+                                            "mode": side,
+                                            "argument": argument,
+                                            "other_argument": oa,
+                                            "verdict": v_fb,
+                                            "prompt_text": prompt_text_fb,
+                                            "cached": meta_fb.get("cached"),
+                                            "model_used": meta_fb.get("model_used"),
+                                            "temperature": meta_fb.get("temperature"),
+                                            "max_tokens": meta_fb.get("max_tokens"),
+                                            "base_url": meta_fb.get("base_url"),
+                                            "request_url": meta_fb.get("request_url"),
+                                            "fallback_from": "21",
+                                            "fallback_to": "22",
+                                            "fallback_used": True,
+                                            "primary_verdict": final_v,
+                                        }
+                                        if err_fb:
+                                            row_log_fb["error"] = err_fb
+                                        prompt_logs.append(row_log_fb)
+                                        fallback_used = True
+                                        fallback_verdict = int(v_fb)
+                                        if int(v_fb) == 1:
+                                            final_v = 1
+
+                                row_log2: Dict[str, Any] = {
+                                    "id": sent_id,
                                     "relation_ja": rel_canon,
-                                    "side": side,
-                                    "concept_ja": concept,
+                                    "relation_raw": rel_raw,
+                                    "ontology_id": ontology_id,
+                                    "prompt_id": prompt_id,
+                                    "prompt_name": prompt_name,
+                                    "mode": side,
                                     "argument": argument,
                                     "other_argument": oa,
-                                    "context_sentence": sentence,
-                                },
-                            )
-                            v = ontology_judge.judge_prompt(prompt_text)
-                            _m = getattr(ontology_judge, "last_meta", {}) or {}
-                            _e = getattr(ontology_judge, "last_error", None)
-                            _row = {
-                                "id": sent_id,
-                                "relation_ja": rel_canon,
-                                "relation_raw": rel_raw,
-                                "ontology_id": ontology_id,
-                                "prompt_id": prompt_id,
-                                "prompt_name": prompt_name,
-                                "mode": side,
-                                "argument": argument,
-                                "other_argument": oa,
-                                "verdict": v,
-                                "prompt_text": prompt_text,
-                                "cached": _m.get("cached"),
-                                "model_used": _m.get("model_used"),
-                                "base_url": _m.get("base_url"),
-                                "request_url": _m.get("request_url"),
-                            }
-                            if _e:
-                                _row["error"] = _e
-                            prompt_logs.append(_row)
-                            return v
+                                    "verdict": v,
+                                    "prompt_text": prompt_text,
+                                    "cached": meta.get("cached"),
+                                    "model_used": meta.get("model_used"),
+                                    "temperature": meta.get("temperature"),
+                                    "max_tokens": meta.get("max_tokens"),
+                                    "base_url": meta.get("base_url"),
+                                    "request_url": meta.get("request_url"),
+                                    "fallback_to": "22" if str(prompt_id) == "21" else None,
+                                    "fallback_used": fallback_used,
+                                    "fallback_verdict": fallback_verdict,
+                                    "final_verdict": final_v,
+                                }
+                                if err:
+                                    row_log2["error"] = err
+                                prompt_logs.append(row_log2)
+                                prompt_side_verdict_cache[call_key] = int(final_v)
+                                return int(final_v)
 
                         for a, b in _iter_allowed_pairs(x_values, parallel_value_groups):
                             # Try (domain=a, range=b)
@@ -1818,6 +1904,11 @@ def process_jsonl(input_jsonl_path: str, ast_dict: dict) -> None:
     print("保存先(verified): {}".format(verified_csv))
     print("保存先(可視化): {}".format(vis_csv))
     print("ログ: {}".format(log_dir))
+    summary_path, warn_lines, _summary = write_prompt_accept_summary(prompt_log_path, log_dir)
+    if summary_path:
+        print(f"prompt accept summary: {summary_path}")
+    for w in (warn_lines or []):
+        print(w)
 def main():
     preflight_ontology_llm()
     print("パターンJSONをロード中…")

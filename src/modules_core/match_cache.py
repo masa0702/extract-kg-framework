@@ -90,10 +90,11 @@ def validate_match_cache_payload(payload: Dict[str, Any]) -> bool:
 class MatchCacheStore:
     store: SentenceCacheStore
     patterns_fingerprint: str
+    allow_fingerprint_mismatch: bool = False
 
     @classmethod
-    def from_dir(cls, root_dir: str, patterns_fingerprint: str) -> "MatchCacheStore":
-        return cls(SentenceCacheStore(root_dir, "match"), patterns_fingerprint)
+    def from_dir(cls, root_dir: str, patterns_fingerprint: str, *, allow_fingerprint_mismatch: bool = False) -> "MatchCacheStore":
+        return cls(SentenceCacheStore(root_dir, "match"), patterns_fingerprint, bool(allow_fingerprint_mismatch))
 
     def load(self, sentence: str) -> Optional[Dict[str, Any]]:
         data = self.store.load(sentence)
@@ -102,7 +103,8 @@ class MatchCacheStore:
         if not validate_match_cache_payload(data):
             return None
         if str(data.get("patterns_fingerprint", "")) != str(self.patterns_fingerprint):
-            return None
+            if not self.allow_fingerprint_mismatch:
+                return None
         return data
 
     def save(self, sentence: str, matches: List[Dict[str, Any]]) -> Dict[str, Any]:

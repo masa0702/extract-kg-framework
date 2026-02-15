@@ -163,7 +163,7 @@ cython_debug/
 
 # json, csv
 # *.json
-*.csv
+# *.csv
 
 # prof
 *.prof
@@ -180,7 +180,7 @@ cython_debug/
 core*
 *.png
 .DS_Store
-
+*.gz
 # ignore dirs
 tool_test/
 test_asts/
@@ -200,7 +200,17 @@ data/T2KGB_JA/test_target_data/
 data/patterns/
 learn_data/
 tmp_single_sentence_run/
-results/
+results/ver1.0/
+results/ver2.0/
+results/ver3.0/
+results/ver4.0/
+results/ver5.0/
+results/ver6.0/
+results/ver7.0/
+results/ver8.0/
+results/ver9.0/
+results/ver10.0/
+
 tmp_quick_input/
 tmp_quick_resutls/
 tmp_quick_resutls2/

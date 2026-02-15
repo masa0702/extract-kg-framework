@@ -379,12 +379,19 @@ class OntologyJudgeLLMJP:
         self.cfg = cfg or OntologyJudgeConfig()
         # Use ontology-specific vLLM endpoint(s) for better throughput and scaling.
         self.client = get_llmjp_http_for("onto")
-        self._judge_cached = lru_cache(maxsize=self.cfg.cache_size)(self._judge_uncached)
+        # Cache must include generation params; otherwise temperature/max_tokens overrides would be mixed.
+        self._judge_cached = lru_cache(maxsize=self.cfg.cache_size)(self._judge_uncached_keyed)
         self.last_error: Optional[str] = None
         self.last_meta: Dict[str, Any] = {}
         self._strict = str(os.getenv("ONTOLOGY_VERIFY_STRICT", "1")).strip().lower() not in ("0", "false", "no", "")
 
-    def judge_prompt(self, prompt_text: str) -> int:
+    def judge_prompt(
+        self,
+        prompt_text: str,
+        *,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+    ) -> int:
         self.last_error = None
         # Clear request metadata so cache hits don't inherit previous request values.
         try:
@@ -392,12 +399,17 @@ class OntologyJudgeLLMJP:
             setattr(self.client, "last_url", None)
         except Exception:
             pass
+        eff_temp = float(self.cfg.temperature if (temperature is None) else temperature)
+        eff_max_tokens = int(self.cfg.max_tokens if (max_tokens is None) else max_tokens)
+        model_used = (self.cfg.model or getattr(self.client, "model", None) or "")
         self.last_meta = {
             "cached": False,
-            "model_used": (self.cfg.model or getattr(self.client, "model", None)),
+            "model_used": (model_used or None),
             "base_urls": getattr(self.client, "base_urls", None),
             "base_url": getattr(self.client, "last_base_url", None),
             "request_url": getattr(self.client, "last_url", None),
+            "temperature": eff_temp,
+            "max_tokens": eff_max_tokens,
         }
         if not prompt_text:
             return 0
@@ -409,7 +421,7 @@ class OntologyJudgeLLMJP:
         except Exception:
             before = None
         try:
-            out = int(self._judge_cached(prompt_text))
+            out = int(self._judge_cached(prompt_text, eff_temp, eff_max_tokens, model_used))
         except Exception as e:
             self.last_error = f"{type(e).__name__}: {e}"
             self.last_meta.update(
@@ -440,7 +452,7 @@ class OntologyJudgeLLMJP:
             self.last_meta["request_url"] = getattr(self.client, "last_url", None)
         return out
 
-    def _judge_uncached(self, prompt_text: str) -> int:
+    def _judge_uncached_keyed(self, prompt_text: str, temperature: float, max_tokens: int, model_used: str) -> int:
         messages = [{"role": "user", "content": prompt_text}]
         try:
             obj = self.client.chat_json(
@@ -450,8 +462,8 @@ class OntologyJudgeLLMJP:
                 # IMPORTANT: Do not override onto server's served model name by default.
                 # When cfg.model is None, let the underlying client decide (LLMJP_ONTO_MODEL etc.).
                 model=self.cfg.model,
-                max_tokens=self.cfg.max_tokens,
-                temperature=self.cfg.temperature,
+                max_tokens=int(max_tokens),
+                temperature=float(temperature),
             )
         except Exception as e:
             self.last_error = f"{type(e).__name__}: {e}"

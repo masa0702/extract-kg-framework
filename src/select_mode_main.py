@@ -41,6 +41,7 @@ from modules_core.ontology_verify import (
     render_prompt,
 )
 from modules_core.pattern_compiler import build_ast_dict, load_and_compile_patterns
+from modules_core.prompt_monitor import write_prompt_accept_summary
 from modules_core.text_normalize import strip_trailing_particles
 from pattern.pattern_nodes import ParallelNode, VariableNode
 
@@ -65,7 +66,7 @@ INPUT_JSONL_DIR_DEFAULT = os.getenv(
 )
 RESULTS_ROOT_DEFAULT = os.getenv(
     "RESULTS_ROOT",
-    os.path.join(REPO_ROOT, "results/ver10.0/extract_pred_arg_pair"),
+    os.path.join(REPO_ROOT, "results/ver11.0/extract_pred_arg_pair"),
 )
 
 PROMPTS_JSON = os.getenv("PROMPTS_JSON", os.path.join(REPO_ROOT, "prompts/prompts.json"))
@@ -101,6 +102,16 @@ def iter_jsonl(path: str) -> Iterable[Dict[str, Any]]:
             if not line:
                 continue
             yield json.loads(line)
+
+
+def load_jsonl_records(path: str, *, max_records: int = 0) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    limit = int(max_records or 0)
+    for obj in iter_jsonl(path):
+        out.append(obj)
+        if limit > 0 and len(out) >= limit:
+            break
+    return out
 
 
 def derive_ontology_id_from_filename(path: str) -> str:
@@ -875,10 +886,13 @@ def process_jsonl_select_mode(
     print(f"保存先(run): {run_dir}")
     print(f"cache: {cache_dir}")
 
-    records = list(iter_jsonl(input_jsonl_path))
+    max_records = int(getattr(args, "max_records", 0) or 0)
+    records = load_jsonl_records(input_jsonl_path, max_records=max_records)
     if not records:
         print("JSONLが空です。スキップします。")
         return
+    if max_records > 0:
+        print(f"max_records: {max_records}")
 
     sentences: List[str] = []
     seen_sentences: set[str] = set()
@@ -1020,9 +1034,20 @@ def process_jsonl_select_mode(
             }
 
     match_cache_root = os.path.join(cache_dir, "match")
-    match_store = MatchCacheStore.from_dir(match_cache_root, patterns_fingerprint)
+    match_store = MatchCacheStore.from_dir(
+        match_cache_root,
+        patterns_fingerprint,
+        allow_fingerprint_mismatch=bool(args.allow_stale_match_cache),
+    )
 
     existing = {} if (args.cache_mode == "refresh") else match_store.load_many(unique_by_sentence.keys())
+    if args.allow_stale_match_cache and existing:
+        mism = 0
+        for _s, payload in existing.items():
+            if str(payload.get("patterns_fingerprint", "")) != str(patterns_fingerprint):
+                mism += 1
+        if mism:
+            print(f"[WARN] matchキャッシュ fingerprint 不一致を許容: mismatched={mism}/{len(existing)}")
     to_build: List[Dict[str, Any]] = []
     if args.cache_mode == "refresh":
         to_build = list(unique_by_sentence.values())
@@ -1030,6 +1055,10 @@ def process_jsonl_select_mode(
         for s, payload in unique_by_sentence.items():
             if s not in existing:
                 to_build.append(payload)
+
+    if args.allow_stale_match_cache and args.cache_mode != "refresh" and to_build:
+        print(f"[WARN] allow_stale_match_cache=1 のため matchキャッシュ生成をスキップします: missing={len(to_build)}")
+        to_build = []
 
     if to_build:
         print(f"matchキャッシュ生成: {len(to_build)} 文 (cache_mode={args.cache_mode})")
@@ -1163,52 +1192,21 @@ def process_jsonl_select_mode(
     # Verification stage (mode-dependent).
     mode = args.mode
 
-    judge_parallel = ParallelJudgeLLMJP()
-    if mode == "no_verification":
-        # Parallel verification is still executed for logging, but it does not affect extraction here.
-        for rr in tqdm(record_rows, desc="parallel(no_verification)"):
-            sent_id = rr.get("id", "")
-            sentence = rr.get("sentence", "")
-            ontology_id = rr.get("ontology_id", "") or ""
-            cache_payload = existing.get(sentence)
-            if not cache_payload:
-                continue
-            for m in cache_payload.get("matches") or []:
-                ast_uid = m.get("ast_uid", "")
-                varmap_clean = m.get("varmap_clean", {}) or {}
-                for g in m.get("parallel_var_groups", []) or []:
-                    vals = [str(varmap_clean.get(name, "") or "") for name in g]
-                    vals = [v for v in vals if v]
-                    if len(vals) < 2:
-                        continue
-                    res = judge_parallel.judge_parallel(sentence, vals)
-                    _append_jsonl(
-                        parallel_log_path,
-                        [
-                            {
-                                "id": sent_id,
-                                "sentence": sentence,
-                                "ontology_id": ontology_id,
-                                "ast_uid": ast_uid,
-                                "pattern_id": m.get("pattern_id", ""),
-                                "group": g,
-                                "values": vals,
-                                "result": res,
-                            }
-                        ],
-                    )
-
+    def _emit_no_verification_extracted_triples(out_jsonl_path: str) -> None:
         # Extract triples from (X, Y) combinations:
         # - Require relation to be absorbed into ontology-defined one by partial match; otherwise skip.
         # - For each unordered (arg1,arg2) pair, emit both directions:
         #   (arg1, rel, arg2) and (arg2, rel, arg1)
+        if not os.path.exists(out_jsonl_path):
+            with open(out_jsonl_path, "w", encoding="utf-8") as _:
+                pass
         for rr in tqdm(record_rows, desc="extracted_triples(no_verification)"):
             sent_id = rr.get("id", "")
             sentence = rr.get("sentence", "")
             ontology_id = rr.get("ontology_id", "") or ""
             cache_payload = existing.get(sentence)
             if not cache_payload:
-                _append_jsonl(extracted_jsonl_path, [{"id": sent_id, "sent_ja": sentence, "extracted_triples": []}])
+                _append_jsonl(out_jsonl_path, [{"id": sent_id, "sent_ja": sentence, "extracted_triples": []}])
                 continue
             matches = cache_payload.get("matches") or []
 
@@ -1234,7 +1232,57 @@ def process_jsonl_select_mode(
                             seen_tr_set.add(key3)
                             triples_out.append({"sub": sub, "rel": rel, "obj": obj})
 
-            _append_jsonl(extracted_jsonl_path, [{"id": sent_id, "sent_ja": sentence, "extracted_triples": triples_out}])
+            _append_jsonl(out_jsonl_path, [{"id": sent_id, "sent_ja": sentence, "extracted_triples": triples_out}])
+
+    judge_parallel = ParallelJudgeLLMJP()
+
+    # default モード実行時に、同一 run_dir に no_verification の extracted_triples も同時生成する。
+    if mode == "default" and bool(getattr(args, "emit_no_verification_in_default", True)):
+        nv_verified_csv = os.path.join(run_dir, f"no_verification_{prefix}_triples_verified.csv")
+        nv_prompt_log_path = os.path.join(run_dir, f"no_verification_{prefix}_prompt_log.jsonl")
+        nv_extracted_jsonl_path = os.path.join(run_dir, f"no_verification_{prefix}_extracted_triples.jsonl")
+        _ensure_csv_header(nv_verified_csv, triple_cols)
+        if not os.path.exists(nv_prompt_log_path):
+            with open(nv_prompt_log_path, "w", encoding="utf-8") as _:
+                pass
+        _emit_no_verification_extracted_triples(nv_extracted_jsonl_path)
+
+    if mode == "no_verification":
+        if args.log_parallel_in_no_verification:
+            # Parallel verification is executed only for logging, but it does not affect extraction here.
+            for rr in tqdm(record_rows, desc="parallel(no_verification)"):
+                sent_id = rr.get("id", "")
+                sentence = rr.get("sentence", "")
+                ontology_id = rr.get("ontology_id", "") or ""
+                cache_payload = existing.get(sentence)
+                if not cache_payload:
+                    continue
+                for m in cache_payload.get("matches") or []:
+                    ast_uid = m.get("ast_uid", "")
+                    varmap_clean = m.get("varmap_clean", {}) or {}
+                    for g in m.get("parallel_var_groups", []) or []:
+                        vals = [str(varmap_clean.get(name, "") or "") for name in g]
+                        vals = [v for v in vals if v]
+                        if len(vals) < 2:
+                            continue
+                        res = judge_parallel.judge_parallel(sentence, vals)
+                        _append_jsonl(
+                            parallel_log_path,
+                            [
+                                {
+                                    "id": sent_id,
+                                    "sentence": sentence,
+                                    "ontology_id": ontology_id,
+                                    "ast_uid": ast_uid,
+                                    "pattern_id": m.get("pattern_id", ""),
+                                    "group": g,
+                                    "values": vals,
+                                    "result": res,
+                                        }
+                                    ],
+                                )
+
+        _emit_no_verification_extracted_triples(extracted_jsonl_path)
 
         print("no_verification: verified は生成しません（0行）。extracted_triples は match 由来で生成します。")
         return
@@ -1312,29 +1360,52 @@ def process_jsonl_select_mode(
                 elif mode == "no_parallel_verification":
                     pass
 
-                resolved_rows: Dict[str, Dict[str, Any]] = {}
+                # Default: be conservative in resolving relations.
+                # Use the same "partial match" canonicalization as no_verification to avoid
+                # mapping ambiguous surface forms into wrong PIDs (which can explode FP).
+                resolved_rows: List[Tuple[str, str, Dict[str, Any]]] = []
+                seen_rel_canon: set[str] = set()
                 for rel in y_values:
-                    row = rel_row_cache.get(rel) or ontology_resolver.resolve_relation_row(rel, ontology_id)
+                    rel_raw = str(rel or "")
+                    rel_canon_hint = resolve_relation_by_partial_match(ontology_resolver, ontology_id, rel_raw) or ""
+                    if not rel_canon_hint:
+                        continue
+                    row = rel_row_cache.get(rel_canon_hint) or ontology_resolver.resolve_relation_row(rel_canon_hint, ontology_id)
                     if row:
-                        rel_row_cache[rel] = row
-                        resolved_rows[rel] = row
+                        rel_row_cache[rel_canon_hint] = row
+                        if rel_canon_hint in seen_rel_canon:
+                            continue
+                        seen_rel_canon.add(rel_canon_hint)
+                        resolved_rows.append((rel_raw, rel_canon_hint, row))
+
                 if not resolved_rows:
                     for rel in extract_relation_candidates_from_sentence(sentence, ontology_id, ontology_resolver):
-                        row = rel_row_cache.get(rel) or ontology_resolver.resolve_relation_row(rel, ontology_id)
+                        rel_raw = str(rel or "")
+                        rel_canon_hint = resolve_relation_by_partial_match(ontology_resolver, ontology_id, rel_raw) or ""
+                        if not rel_canon_hint:
+                            continue
+                        row = rel_row_cache.get(rel_canon_hint) or ontology_resolver.resolve_relation_row(rel_canon_hint, ontology_id)
                         if row:
-                            rel_row_cache[rel] = row
-                            resolved_rows[rel] = row
+                            rel_row_cache[rel_canon_hint] = row
+                            if rel_canon_hint in seen_rel_canon:
+                                continue
+                            seen_rel_canon.add(rel_canon_hint)
+                            resolved_rows.append((rel_raw, rel_canon_hint, row))
 
-                for rel_raw, row in resolved_rows.items():
+                for rel_raw, rel_canon_hint, row in resolved_rows:
                     rel_canon = (
                         ontology_resolver.canonical_relation_label(row, ontology_id)
                         or normalize_text(row.get("predicate_ja"))
+                        or normalize_text(rel_canon_hint)
                         or normalize_text(rel_raw)
                     )
                     prompt_id = str(row.get("prompt_id", "") or "")
                     prompt = ontology_resolver.get_prompt(prompt_id)
                     if not prompt:
                         continue
+
+                    entailment_prompt_id = str(row.get("entailment_prompt_id", "") or "").strip()
+                    entailment_prompt = ontology_resolver.get_prompt(entailment_prompt_id) if entailment_prompt_id else None
 
                     domain_concept, range_concept = ontology_resolver.resolve_concepts(row, ontology_id)
                     domain_concept = domain_concept or ""
@@ -1348,7 +1419,19 @@ def process_jsonl_select_mode(
                         if not domain_concept or not range_concept:
                             continue
 
-                        for arg1, arg2 in _iter_allowed_pairs(x_values, parallel_value_groups):
+                        # Normalize arguments up-front to reduce spurious mismatches caused by particles.
+                        x_values_clean = [strip_trailing_particles(v) for v in x_values if v]
+                        x_values_clean = [v for v in x_values_clean if v]
+                        if len(x_values_clean) < 2:
+                            continue
+                        parallel_value_groups_clean: List[List[str]] = []
+                        for g in parallel_value_groups:
+                            gg = [strip_trailing_particles(v) for v in (g or []) if v]
+                            gg = [v for v in gg if v]
+                            if len(gg) >= 2:
+                                parallel_value_groups_clean.append(gg)
+
+                        for arg1, arg2 in _iter_allowed_pairs(x_values_clean, parallel_value_groups_clean):
                             call_key = (ontology_id, rel_canon, prompt_id, arg1, arg2)
                             if call_key in seen_prompt_calls:
                                 if log_dup_skips:
@@ -1415,18 +1498,16 @@ def process_jsonl_select_mode(
 
                             if prompt_id == "10":
                                 continue
-                            if verdict == 0:
-                                continue
-
-                            if prompt_id == "04":
-                                if verdict == 1:
-                                    domain_arg, range_arg = arg1, arg2
-                                elif verdict == 2:
-                                    domain_arg, range_arg = arg2, arg1
-                                else:
-                                    continue
-                            else:
+                            # Pair prompts must output direction:
+                            # - verdict=1: arg1=domain, arg2=range
+                            # - verdict=2: arg2=domain, arg1=range
+                            # - verdict=0/other: reject
+                            if verdict == 1:
                                 domain_arg, range_arg = arg1, arg2
+                            elif verdict == 2:
+                                domain_arg, range_arg = arg2, arg1
+                            else:
+                                continue
 
                             key = (sent_id, rel_canon, domain_arg, range_arg, prompt_id)
                             if key in seen_triples:
@@ -1456,11 +1537,16 @@ def process_jsonl_select_mode(
                             continue
                         if not domain_concept or not range_concept:
                             continue
+                        prompt_side_verdict_cache: Dict[Tuple[str, str, str, str, str], int] = {}
+                        entailment_verdict_cache: Dict[Tuple[str, str, str, str, str], int] = {}
 
                         def _judge_side(side: str, concept: str, argument: str, other_argument: str) -> int:
-                            oa = other_argument if other_argument else pick_other_argument(x_values, argument)
-                            call_key = (ontology_id, rel_canon, prompt_id, side, argument)
-                            if call_key in seen_prompt_calls:
+                            # Keep raw values for "other argument" selection, but normalize before LLM call.
+                            arg_clean = strip_trailing_particles(argument or "")
+                            oa_raw = other_argument if other_argument else pick_other_argument(x_values, argument)
+                            oa_clean = strip_trailing_particles(oa_raw or "")
+                            call_key = (ontology_id, rel_canon, prompt_id, side, arg_clean)
+                            if call_key in prompt_side_verdict_cache:
                                 if log_dup_skips:
                                     _append_jsonl(
                                         prompt_log_path,
@@ -1473,15 +1559,14 @@ def process_jsonl_select_mode(
                                                 "prompt_id": prompt_id,
                                                 "prompt_name": prompt_name,
                                                 "mode": side,
-                                                "argument": argument,
-                                                "other_argument": oa,
-                                                "verdict": None,
+                                                "argument": arg_clean,
+                                                "other_argument": oa_clean,
+                                                "verdict": prompt_side_verdict_cache.get(call_key),
                                                 "skipped_duplicate": True,
                                             }
                                         ],
                                     )
-                                return 0
-                            seen_prompt_calls.add(call_key)
+                                return int(prompt_side_verdict_cache.get(call_key, 0))
 
                             prompt_text = render_prompt(
                                 prompt,
@@ -1489,19 +1574,88 @@ def process_jsonl_select_mode(
                                     "relation_ja": rel_canon,
                                     "side": side,
                                     "concept_ja": concept,
-                                    "argument": argument,
-                                    "other_argument": oa,
+                                    "argument": arg_clean,
+                                    "other_argument": oa_clean,
                                     "context_sentence": sentence,
                                 },
                             )
                             try:
-                                v = ontology_judge.judge_prompt(prompt_text)
+                                t_override = None
+                                mt_override = None
+                                if str(prompt_id) == "21":
+                                    try:
+                                        t_override = float(os.getenv("PROMPT21_TEMPERATURE", "0.15"))
+                                    except Exception:
+                                        t_override = 0.15
+                                    try:
+                                        s_mt = os.getenv("PROMPT21_MAX_TOKENS", "").strip()
+                                        mt_override = int(s_mt) if s_mt else None
+                                    except Exception:
+                                        mt_override = None
+                                v = ontology_judge.judge_prompt(prompt_text, temperature=t_override, max_tokens=mt_override)
                             except Exception as e:
                                 raise RuntimeError(
                                     f"ontology verify failed: id={sent_id!r} prompt_id={prompt_id!r} side={side!r} error={e}"
                                 ) from e
                             meta = getattr(ontology_judge, "last_meta", {}) or {}
                             err = getattr(ontology_judge, "last_error", None)
+
+                            final_v = int(v)
+                            fallback_used = False
+                            fallback_verdict = None
+                            if str(prompt_id) == "21" and final_v == 0:
+                                prompt_fb = ontology_resolver.get_prompt("22")
+                                if prompt_fb:
+                                    prompt_text_fb = render_prompt(
+                                        prompt_fb,
+                                        {
+                                            "relation_ja": rel_canon,
+                                            "side": side,
+                                            "concept_ja": concept,
+                                            "argument": arg_clean,
+                                            "other_argument": oa_clean,
+                                            "context_sentence": sentence,
+                                        },
+                                    )
+                                    try:
+                                        v_fb = ontology_judge.judge_prompt(prompt_text_fb, temperature=0.0)
+                                    except Exception as e:
+                                        raise RuntimeError(
+                                            f"ontology verify failed (fallback): id={sent_id!r} prompt_id='22' side={side!r} error={e}"
+                                        ) from e
+                                    meta_fb = getattr(ontology_judge, "last_meta", {}) or {}
+                                    err_fb = getattr(ontology_judge, "last_error", None)
+                                    row_log_fb: Dict[str, Any] = {
+                                        "id": sent_id,
+                                        "relation_ja": rel_canon,
+                                        "relation_raw": rel_raw,
+                                        "ontology_id": ontology_id,
+                                        "prompt_id": "22",
+                                        "prompt_name": getattr(prompt_fb, "prompt_name", ""),
+                                        "mode": side,
+                                        "argument": arg_clean,
+                                        "other_argument": oa_clean,
+                                        "verdict": v_fb,
+                                        "prompt_text": prompt_text_fb,
+                                        "cached": meta_fb.get("cached"),
+                                        "model_used": meta_fb.get("model_used"),
+                                        "temperature": meta_fb.get("temperature"),
+                                        "max_tokens": meta_fb.get("max_tokens"),
+                                        "base_url": meta_fb.get("base_url"),
+                                        "request_url": meta_fb.get("request_url"),
+                                        "fallback_from": "21",
+                                        "fallback_to": "22",
+                                        "fallback_used": True,
+                                        "primary_verdict": final_v,
+                                    }
+                                    if err_fb:
+                                        row_log_fb["error"] = err_fb
+                                    _append_jsonl(prompt_log_path, [row_log_fb])
+                                    fallback_used = True
+                                    fallback_verdict = int(v_fb)
+                                    if int(v_fb) == 1:
+                                        final_v = 1
+
                             row_log2: Dict[str, Any] = {
                                 "id": sent_id,
                                 "relation_ja": rel_canon,
@@ -1510,25 +1664,89 @@ def process_jsonl_select_mode(
                                 "prompt_id": prompt_id,
                                 "prompt_name": prompt_name,
                                 "mode": side,
-                                "argument": argument,
-                                "other_argument": oa,
+                                "argument": arg_clean,
+                                "other_argument": oa_clean,
                                 "verdict": v,
                                 "prompt_text": prompt_text,
                                 "cached": meta.get("cached"),
                                 "model_used": meta.get("model_used"),
+                                "temperature": meta.get("temperature"),
+                                "max_tokens": meta.get("max_tokens"),
                                 "base_url": meta.get("base_url"),
                                 "request_url": meta.get("request_url"),
+                                "fallback_to": "22" if str(prompt_id) == "21" else None,
+                                "fallback_used": fallback_used,
+                                "fallback_verdict": fallback_verdict,
+                                "final_verdict": final_v,
                             }
                             if err:
                                 row_log2["error"] = err
                             _append_jsonl(prompt_log_path, [row_log2])
-                            return int(v)
+                            prompt_side_verdict_cache[call_key] = int(final_v)
+                            return int(final_v)
+
+                        def _judge_entailment(domain_arg: str, range_arg: str) -> int:
+                            if not entailment_prompt:
+                                return 1
+                            da = strip_trailing_particles(domain_arg or "")
+                            ra = strip_trailing_particles(range_arg or "")
+                            call_key = (ontology_id, rel_canon, entailment_prompt_id, da, ra)
+                            if call_key in entailment_verdict_cache:
+                                return int(entailment_verdict_cache.get(call_key, 0))
+
+                            prompt_text = render_prompt(
+                                entailment_prompt,
+                                {
+                                    "relation_ja": rel_canon,
+                                    "domain_concept_ja": domain_concept,
+                                    "range_concept_ja": range_concept,
+                                    "arg1": da,
+                                    "arg2": ra,
+                                    "context_sentence": sentence,
+                                },
+                            )
+                            try:
+                                v = ontology_judge.judge_prompt(prompt_text)
+                            except Exception as e:
+                                raise RuntimeError(
+                                    f"ontology entailment failed: id={sent_id!r} prompt_id={entailment_prompt_id!r} error={e}"
+                                ) from e
+                            meta = getattr(ontology_judge, "last_meta", {}) or {}
+                            err = getattr(ontology_judge, "last_error", None)
+                            row_log: Dict[str, Any] = {
+                                "id": sent_id,
+                                "relation_ja": rel_canon,
+                                "relation_raw": rel_raw,
+                                "ontology_id": ontology_id,
+                                "prompt_id": entailment_prompt_id,
+                                "prompt_name": getattr(entailment_prompt, "prompt_name", ""),
+                                "mode": "entailment",
+                                "arg1": da,
+                                "arg2": ra,
+                                "verdict": v,
+                                "prompt_text": prompt_text,
+                                "cached": meta.get("cached"),
+                                "model_used": meta.get("model_used"),
+                                "temperature": meta.get("temperature"),
+                                "max_tokens": meta.get("max_tokens"),
+                                "base_url": meta.get("base_url"),
+                                "request_url": meta.get("request_url"),
+                            }
+                            if err:
+                                row_log["error"] = err
+                            _append_jsonl(prompt_log_path, [row_log])
+
+                            final_v = 1 if int(v) != 0 else 0
+                            entailment_verdict_cache[call_key] = int(final_v)
+                            return int(final_v)
 
                         for a, b in _iter_allowed_pairs(x_values, parallel_value_groups):
                             vd = _judge_side("domain", domain_concept, a, b)
                             if vd == 1:
                                 vr = _judge_side("range", range_concept, b, a)
                                 if vr == 1:
+                                    if _judge_entailment(a, b) != 1:
+                                        continue
                                     domain_arg, range_arg = a, b
                                     verdict = 1
                                     key = (sent_id, rel_canon, domain_arg, range_arg, prompt_id)
@@ -1558,6 +1776,8 @@ def process_jsonl_select_mode(
                             if vd == 1:
                                 vr = _judge_side("range", range_concept, a, b)
                                 if vr == 1:
+                                    if _judge_entailment(b, a) != 1:
+                                        continue
                                     domain_arg, range_arg = b, a
                                     verdict = 1
                                     key = (sent_id, rel_canon, domain_arg, range_arg, prompt_id)
@@ -1607,6 +1827,11 @@ def process_jsonl_select_mode(
     print(f"prompt log: {prompt_log_path}")
     print(f"extracted_triples: {extracted_jsonl_path}")
     print(f"logs: {run_log_dir}")
+    summary_path, warn_lines, _summary = write_prompt_accept_summary(prompt_log_path, run_log_dir)
+    if summary_path:
+        print(f"prompt accept summary: {summary_path}")
+    for w in (warn_lines or []):
+        print(w)
 
 
 def parse_args() -> argparse.Namespace:
@@ -1620,11 +1845,40 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--pattern_index_json", default=PATTERN_INDEX_JSON_DEFAULT, help="patterns.index.json")
     ap.add_argument("--pattern_jsonl", default=PATTERN_JSONL_DEFAULT, help="patterns.jsonl")
     ap.add_argument("--input_jsonl_dir", default=INPUT_JSONL_DIR_DEFAULT, help="入力JSONLディレクトリ")
+    ap.add_argument(
+        "--only_ontology_ids",
+        "--only-ontology-ids",
+        default="",
+        help="処理対象の ontology_id を制限します（例: 'ont_1_movie,ont_4_book,ont_6_computer'）。空なら全件。",
+    )
     ap.add_argument("--results_root", default=RESULTS_ROOT_DEFAULT, help="results root")
     ap.add_argument("--run_tag", default="auto", help="run tag (auto=timestamp)")
+    ap.add_argument(
+        "--max_records",
+        default="0",
+        help="各入力JSONLで処理する最大レコード数（0なら全件）。PDCAの高速化用。",
+    )
     ap.add_argument("--cache_mode", default="reuse", choices=["reuse", "refresh"], help="matchキャッシュ再利用/再生成")
+    ap.add_argument(
+        "--allow_stale_match_cache",
+        "--allow-stale-match-cache",
+        default="0",
+        help="matchキャッシュの patterns_fingerprint 不一致を許容します (0/1)。既存キャッシュを優先したい場合に使います。",
+    )
+    ap.add_argument(
+        "--log_parallel_in_no_verification",
+        "--log-parallel-in-no-verification",
+        default="0",
+        help="no_verification モードでも parallel 判定ログを出します (0/1)。通常は遅いので 0 推奨。",
+    )
     ap.add_argument("--export_candidate_slim", default="1", help="candidate_slim を出力するか (0/1)")
     ap.add_argument("--export_ast_repr", default=os.getenv("EXPORT_AST_REPR", ""), help="ast_repr 列を出すか (0/1)")
+    ap.add_argument(
+        "--emit_no_verification_in_default",
+        "--emit-no-verification-in-default",
+        default="1",
+        help="default モード実行時に no_verification の extracted_triples も同時に出力します (0/1)。",
+    )
     return ap.parse_args()
 
 
@@ -1632,8 +1886,34 @@ def main() -> None:
     args = parse_args()
     args.export_candidate_slim = str(args.export_candidate_slim).strip().lower() not in ("0", "false", "no", "")
     args.export_ast_repr = str(args.export_ast_repr).strip().lower() in ("1", "true", "yes", "on")
+    args.emit_no_verification_in_default = str(getattr(args, "emit_no_verification_in_default", "1") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    args.allow_stale_match_cache = str(getattr(args, "allow_stale_match_cache", "0") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    args.log_parallel_in_no_verification = str(getattr(args, "log_parallel_in_no_verification", "0") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
     if args.run_tag == "auto":
         args.run_tag = f"{_utc_tag()}__mode-{args.mode}"
+
+    only_ontology_ids: Optional[set[str]] = None
+    s_only = str(getattr(args, "only_ontology_ids", "") or "").strip()
+    if s_only:
+        parts = [p.strip() for p in s_only.replace(" ", ",").split(",")]
+        only_ontology_ids = {p for p in parts if p}
+        if only_ontology_ids:
+            print(f"only_ontology_ids: {sorted(only_ontology_ids)}")
 
     print("パターンJSONをロード中…")
     patterns = load_and_compile_patterns(index_path=args.pattern_index_json, jsonl_path=args.pattern_jsonl)
@@ -1659,6 +1939,14 @@ def main() -> None:
     if not jsonl_paths:
         print(f"入力JSONLが見つかりません: {args.input_jsonl_dir}")
         return
+
+    if only_ontology_ids:
+        before = len(jsonl_paths)
+        jsonl_paths = [p for p in jsonl_paths if derive_ontology_id_from_filename(p) in only_ontology_ids]
+        print(f"入力JSONLフィルタ: {len(jsonl_paths)}/{before}")
+        if not jsonl_paths:
+            print("フィルタ後に入力JSONLがありません。終了します。")
+            return
 
     for path in jsonl_paths:
         process_jsonl_select_mode(path, ast_dict, patterns_fingerprint, args)

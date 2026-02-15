@@ -34,6 +34,7 @@ import socket
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 try:
@@ -635,6 +636,144 @@ def _has_nonempty_pred(rec: Optional[Dict[str, Any]]) -> bool:
     return isinstance(v, list) and len(v) > 0
 
 
+_GOLD_BASENAME_RE = re.compile(r"^ont_(\d+)_([A-Za-z0-9_]+)_(?:gold|ground_truth)\.jsonl$")
+
+
+def _infer_ontology_key_from_gold_path(gold_path: str) -> Optional[Tuple[str, str]]:
+    """
+    gold_path のファイル名から (ont_i, category) を推定します。
+    例: ont_1_movie_gold.jsonl -> ("1", "movie")
+    """
+    m = _GOLD_BASENAME_RE.match(os.path.basename(gold_path))
+    if not m:
+        return None
+    return (m.group(1), m.group(2))
+
+
+@lru_cache(maxsize=64)
+def _load_ontology_relation_labels(ont_i: str, category: str) -> Tuple[str, ...]:
+    """
+    ontology/<ont_i>_<category>_ontology_trans_ja.json の relations から、
+    relation のラベル文字列（日本語/英語など）を収集して返します。
+
+    NOTE: 無い場合は空タプル。
+    """
+    path = os.path.join(REPO_ROOT, "ontology", f"{ont_i}_{category}_ontology_trans_ja.json")
+    if not os.path.exists(path):
+        return tuple()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:
+        return tuple()
+
+    labels: List[str] = []
+    rels = d.get("relations")
+    if isinstance(rels, list):
+        for r in rels:
+            if not isinstance(r, dict):
+                continue
+            for k in ("label_wiki_ja", "label_ja", "label"):
+                v = safe_strip(r.get(k))
+                if v:
+                    labels.append(v)
+    # 重複排除（順序は長いもの優先にして substring 判定の無駄を減らす）
+    uniq = sorted(set(labels), key=len, reverse=True)
+    return tuple(uniq)
+
+
+def _triple_has_relation_label_in_arg(t: Dict[str, Any], relation_labels: Tuple[str, ...]) -> bool:
+    """
+    subject または object に「relation 名」が混入している triple を弾くための判定。
+    """
+    if not relation_labels:
+        return False
+    sub = safe_strip(t.get("sub"))
+    obj = safe_strip(t.get("obj"))
+    if not sub and not obj:
+        return False
+    for lab in relation_labels:
+        if lab and (lab in sub or lab in obj):
+            return True
+    return False
+
+
+def _ids_has_null(ids: Any, t: Dict[str, Any]) -> bool:
+    """
+    triple_ids が JSON null を含む場合（= None）に、その triple を評価対象から除外するための判定。
+
+    - sub_id / rel_id は必須
+    - obj は literal（obj_literal が非 None）なら obj_id 不要
+    - obj が literal でなく、obj 文字列が空でないのに obj_id が無い場合は除外
+    """
+    if not isinstance(ids, dict):
+        return True
+    sub_id = ids.get("sub_id")
+    rel_id = ids.get("rel_id")
+    obj_id = ids.get("obj_id")
+    obj_literal = ids.get("obj_literal")
+
+    if sub_id is None or safe_strip(sub_id) == "":
+        return True
+    if rel_id is None or safe_strip(rel_id) == "":
+        return True
+
+    if obj_literal is not None:
+        # literal の場合は obj_id を要求しない（ただし空 literal は無効）
+        if safe_strip(obj_literal) == "":
+            return True
+        return False
+
+    obj_text = safe_strip(t.get("obj"))
+    if obj_text and (obj_id is None or safe_strip(obj_id) == ""):
+        return True
+    return False
+
+
+def _ids_has_null_ids_only(ids: Any) -> bool:
+    """
+    triple 本体が無い場合でも「null を含むか」を保守的に判定します（ID評価用）。
+    """
+    if not isinstance(ids, dict):
+        return True
+    sub_id = ids.get("sub_id")
+    rel_id = ids.get("rel_id")
+    obj_id = ids.get("obj_id")
+    obj_literal = ids.get("obj_literal")
+
+    if sub_id is None or safe_strip(sub_id) == "":
+        return True
+    if rel_id is None or safe_strip(rel_id) == "":
+        return True
+    if obj_literal is not None:
+        return safe_strip(obj_literal) == ""
+    # literal でないなら obj_id は必須（obj テキストを参照できないため保守的に除外）
+    if obj_id is None or safe_strip(obj_id) == "":
+        return True
+    return False
+
+
+def _filter_pred_triples_by_relation_label(
+    pred_triples: List[Dict[str, Any]],
+    relation_labels: Tuple[str, ...],
+) -> Tuple[List[Dict[str, Any]], List[int]]:
+    """
+    「オントロジーで定義された relation 名が sub/obj に混入している triple」を除外します。
+
+    返り値:
+    - kept_triples: フィルタ後の triple
+    - kept_indices: 元の pred_triples に対する index（triple_ids が同長なら対応付けに使える）
+    """
+    kept_triples: List[Dict[str, Any]] = []
+    kept_indices: List[int] = []
+    for i, t in enumerate(pred_triples):
+        if _triple_has_relation_label_in_arg(t, relation_labels):
+            continue
+        kept_triples.append(t)
+        kept_indices.append(i)
+    return kept_triples, kept_indices
+
+
 def load_by_id(path: str) -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
     for rec in iter_jsonl(path):
@@ -650,37 +789,69 @@ def evaluate_pair(
     *,
     gold_field: str,
     covered_only: bool,
+    collect_eval_record_ids: bool = False,
+    restrict_to_ids: Optional[set[str]] = None,
 ) -> Dict[str, Any]:
     gold = load_by_id(gold_path)
     pred = load_by_id(pred_path)
 
-    all_ids = sorted(set(gold.keys()) | set(pred.keys()))
-    if covered_only:
-        all_ids = [rid for rid in all_ids if _has_nonempty_pred(pred.get(rid))]
+    if restrict_to_ids is not None:
+        all_ids = sorted({str(x) for x in restrict_to_ids if str(x)})
+    else:
+        all_ids = sorted(set(gold.keys()) | set(pred.keys()))
+    ont_key = _infer_ontology_key_from_gold_path(gold_path)
+    relation_labels: Tuple[str, ...] = tuple()
+    if ont_key:
+        relation_labels = _load_ontology_relation_labels(ont_key[0], ont_key[1])
 
     t_text = EvalTotals()
     t_id = EvalTotals()
     id_eval_possible = False
     gold_triples_total = 0
+    eval_records = 0
+    eval_record_ids: List[str] = []
 
     for rid in all_ids:
         g = gold.get(rid) or {}
         p = pred.get(rid) or {}
 
         g_tr = _extract_gold_triples(g, gold_field)
+        p_tr_raw = _extract_pred_triples(p)
+        p_tr, kept_indices = _filter_pred_triples_by_relation_label(p_tr_raw, relation_labels)
+
+        if covered_only and not p_tr:
+            continue
+
+        eval_records += 1
+        if collect_eval_record_ids:
+            eval_record_ids.append(str(rid))
         gold_triples_total += len(g_tr)
-        p_tr = _extract_pred_triples(p)
+
         tp, fp, fn = multiset_match([norm_text_triple(x) for x in p_tr], [norm_text_triple(x) for x in g_tr])
         t_text.tp += tp
         t_text.fp += fp
         t_text.fn += fn
 
         g_ids = g.get("triple_ids")
-        p_ids = p.get("triple_ids")
-        if isinstance(g_ids, list) and isinstance(p_ids, list):
+        # ID評価:
+        # - triple_ids が null を含む場合、その triple は ID評価から除外（要求仕様）
+        # - relation 名混入で除外した triple は、可能なら（aligned なら）ID評価からも除外
+        p_ids_raw = p.get("triple_ids")
+        p_ids_for_eval: List[Dict[str, Any]] = []
+        if isinstance(p_ids_raw, list) and len(p_ids_raw) == len(p_tr_raw):
+            for i in kept_indices:
+                ids_i = p_ids_raw[i]
+                if _ids_has_null(ids_i, p_tr_raw[i]):
+                    continue
+                if isinstance(ids_i, dict):
+                    p_ids_for_eval.append(ids_i)
+        elif isinstance(p_ids_raw, list):
+            p_ids_for_eval = [x for x in p_ids_raw if isinstance(x, dict) and not _ids_has_null_ids_only(x)]
+
+        if isinstance(g_ids, list) and isinstance(p_ids_raw, list):
             id_eval_possible = True
             tp2, fp2, fn2 = multiset_match(
-                [norm_id_triple(x) for x in p_ids if isinstance(x, dict)],
+                [norm_id_triple(x) for x in p_ids_for_eval],
                 [norm_id_triple(x) for x in g_ids if isinstance(x, dict)],
             )
             t_id.tp += tp2
@@ -694,7 +865,7 @@ def evaluate_pair(
         "gold_field": gold_field,
         "covered_only": covered_only,
         "gold_stats": {
-            "eval_records": len(all_ids),
+            "eval_records": eval_records if covered_only else len(all_ids),
             "gold_triples": gold_triples_total,
         },
         "text": {
@@ -717,6 +888,8 @@ def evaluate_pair(
             "recall": r_id,
             "f1": f1_id,
         }
+    if collect_eval_record_ids:
+        out["eval_record_ids"] = eval_record_ids
     return out
 
 
@@ -825,6 +998,12 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
     if not os.path.isdir(results_dir):
         raise SystemExit(f"results_dir not found: {results_dir}")
 
+    noverif_results_dir = getattr(args, "no_verification_results_dir", AUTO)
+    if _is_auto(noverif_results_dir):
+        noverif_results_dir = results_dir
+    if noverif_results_dir and not os.path.isdir(noverif_results_dir):
+        raise SystemExit(f"no_verification_results_dir not found: {noverif_results_dir}")
+
     gold_dir = args.gold_dir
     gold_pattern = args.gold_pattern
     if _is_auto(gold_dir):
@@ -841,6 +1020,12 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
     pred_with_ids_dir = args.pred_with_ids_dir
     if _is_auto(pred_with_ids_dir) and os.path.isdir(os.path.join(out_dir, "with_ids")):
         pred_with_ids_dir = os.path.join(out_dir, "with_ids")
+
+    noverif_with_ids_dir = getattr(args, "no_verification_with_ids_dir", AUTO)
+    if _is_auto(noverif_with_ids_dir):
+        noverif_with_ids_dir = pred_with_ids_dir
+    if noverif_with_ids_dir and _is_auto(noverif_with_ids_dir):
+        noverif_with_ids_dir = ""
 
     gold_pat = re.compile(gold_pattern)
     gold_files = list_files(gold_dir, gold_pat)
@@ -868,6 +1053,18 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
     if not pred_files:
         raise SystemExit(f"No pred files found under {results_dir} matching {args.pred_pattern!r}")
 
+    noverif_path_contains = str(getattr(args, "no_verification_path_contains", "") or "").strip()
+    if not noverif_path_contains:
+        noverif_path_contains = str(getattr(args, "path_contains", "") or "").strip()
+    noverif_pred_map: Dict[Tuple[str, str], str] = {}
+    for _pfx, ont_i, category, p in _iter_extracted_triples_files(
+        noverif_results_dir,
+        args.pred_pattern,
+        only_prefix="no_verification",
+        path_contains=noverif_path_contains,
+    ):
+        noverif_pred_map[(ont_i, category)] = p
+
     # Group by mode prefix (e.g., default / no_verification)
     by_prefix: Dict[str, List[Tuple[str, str, str]]] = defaultdict(list)
     missing_gold: List[Dict[str, Any]] = []
@@ -891,9 +1088,13 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
     }
 
     no_progress = bool(getattr(args, "no_progress", False))
+    default_covered_ids_by_key: Dict[Tuple[str, str], set[str]] = {}
     for prefix, items in sorted(by_prefix.items()):
         prefix_dir = os.path.join(out_dir, prefix)
         os.makedirs(prefix_dir, exist_ok=True)
+        covered_ids_dir = os.path.join(prefix_dir, "covered_ids")
+        os.makedirs(covered_ids_dir, exist_ok=True)
+        covered_ids_index: List[Dict[str, Any]] = []
 
         per_file_all: List[Dict[str, Any]] = []
         per_file_cov: List[Dict[str, Any]] = []
@@ -927,6 +1128,22 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
                 pred_with_ids_path or pred_path,
                 gold_field=args.gold_field,
                 covered_only=True,
+                collect_eval_record_ids=True,
+            )
+            covered_ids = res_cov.pop("eval_record_ids", [])
+            if prefix == "default":
+                default_covered_ids_by_key[(ont_i, category)] = {str(x) for x in covered_ids if str(x)}
+            covered_ids_path = os.path.join(covered_ids_dir, f"ont_{ont_i}_{category}.txt")
+            with open(covered_ids_path, "w", encoding="utf-8") as f:
+                for rid in covered_ids:
+                    f.write(str(rid) + "\n")
+            covered_ids_index.append(
+                {
+                    "ont_i": ont_i,
+                    "category": category,
+                    "covered_ids_path": covered_ids_path,
+                    "covered_ids_count": len(covered_ids),
+                }
             )
 
             totals_text_all.tp += int(res_all["text"]["tp"])
@@ -1033,6 +1250,7 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
         summary_cov_path = os.path.join(prefix_dir, "summary_covered.json")
         write_json(summary_all_path, run_summary_all)
         write_json(summary_cov_path, run_summary_cov)
+        write_json(os.path.join(covered_ids_dir, "index.json"), {"prefix": prefix, "files": len(items), "per_file": covered_ids_index})
 
         tsv_header = [
             "prefix",
@@ -1190,6 +1408,184 @@ def cmd_eval_results(args: argparse.Namespace) -> None:
         print(f"tsv_all ({prefix}): {tp1}")
         print(f"tsv_covered ({prefix}): {tp2}")
 
+    # Optional: if no_verification pred exists, evaluate it on the same IDs as "default covered".
+    # This is executed only when default evaluation ran in this invocation.
+    if default_covered_ids_by_key:
+        derived_prefix = "no_verification_with_default_eval_ids"
+        derived_dir = os.path.join(out_dir, derived_prefix)
+        os.makedirs(derived_dir, exist_ok=True)
+        derived_pred_dir = os.path.join(derived_dir, "pred")
+        derived_with_ids_dir = os.path.join(derived_dir, "with_ids")
+        os.makedirs(derived_pred_dir, exist_ok=True)
+        os.makedirs(derived_with_ids_dir, exist_ok=True)
+
+        per_file: List[Dict[str, Any]] = []
+        totals_text = EvalTotals()
+        totals_id = EvalTotals()
+        any_id = False
+        gold_triples_total = 0
+        eval_records_total = 0
+
+        def _write_subset_jsonl(in_path: str, out_path: str, allow_ids: set[str]) -> int:
+            wrote = 0
+            with open(out_path, "w", encoding="utf-8") as fo:
+                for rec in iter_jsonl(in_path):
+                    rid = rec.get("id")
+                    if rid is None:
+                        continue
+                    if str(rid) not in allow_ids:
+                        continue
+                    fo.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                    wrote += 1
+            return wrote
+
+        for (ont_i, category), allow_ids in sorted(default_covered_ids_by_key.items()):
+            if not allow_ids:
+                continue
+            noverif_pred_path = noverif_pred_map.get((ont_i, category), "")
+            if not noverif_pred_path:
+                continue
+            gold_path = gold_map.get((ont_i, category), "")
+            if not gold_path:
+                continue
+
+            out_pred_path = os.path.join(derived_pred_dir, os.path.basename(noverif_pred_path))
+            wrote_recs = _write_subset_jsonl(noverif_pred_path, out_pred_path, allow_ids)
+
+            noverif_with_ids_in = ""
+            out_with_ids_path = ""
+            if noverif_with_ids_dir:
+                cand = os.path.join(noverif_with_ids_dir, f"no_verification_ont_{ont_i}_{category}_with_ids.jsonl")
+                if os.path.exists(cand):
+                    noverif_with_ids_in = cand
+                    out_with_ids_path = os.path.join(derived_with_ids_dir, os.path.basename(cand))
+                    _write_subset_jsonl(noverif_with_ids_in, out_with_ids_path, allow_ids)
+
+            eval_pred_path = out_with_ids_path or out_pred_path
+            res = evaluate_pair(
+                gold_path,
+                eval_pred_path,
+                gold_field=args.gold_field,
+                covered_only=False,
+                restrict_to_ids=allow_ids,
+            )
+            t = res["text"]
+            totals_text.tp += int(t["tp"])
+            totals_text.fp += int(t["fp"])
+            totals_text.fn += int(t["fn"])
+
+            gstat = res.get("gold_stats") or {}
+            gold_triples_total += int(gstat.get("gold_triples", 0))
+            eval_records_total += int(gstat.get("eval_records", 0))
+
+            if res.get("id") is not None:
+                any_id = True
+                tid = res["id"]
+                totals_id.tp += int(tid["tp"])
+                totals_id.fp += int(tid["fp"])
+                totals_id.fn += int(tid["fn"])
+
+            per_file.append(
+                {
+                    "ont_i": ont_i,
+                    "category": category,
+                    "default_covered_ids": len(allow_ids),
+                    "wrote_pred_records": wrote_recs,
+                    "pred_path": noverif_pred_path,
+                    "pred_subset_path": out_pred_path,
+                    "pred_with_ids_path": noverif_with_ids_in,
+                    "pred_with_ids_subset_path": out_with_ids_path,
+                    "gold_path": gold_path,
+                    "eval": res,
+                }
+            )
+
+        mp, mr, mf1 = prf(totals_text.tp, totals_text.fp, totals_text.fn)
+        micro_id = None
+        if any_id:
+            ip, ir, if1 = prf(totals_id.tp, totals_id.fp, totals_id.fn)
+            micro_id = {"tp": totals_id.tp, "fp": totals_id.fp, "fn": totals_id.fn, "precision": ip, "recall": ir, "f1": if1}
+
+        summary = {
+            "prefix": derived_prefix,
+            "note": "no_verification を default(covered) と同一ID集合に制限して評価した結果",
+            "gold_stats": {"eval_records": eval_records_total, "gold_triples": gold_triples_total},
+            "micro_text": {
+                "tp": totals_text.tp,
+                "fp": totals_text.fp,
+                "fn": totals_text.fn,
+                "precision": mp,
+                "recall": mr,
+                "f1": mf1,
+            },
+            "micro_id": micro_id,
+            "per_file": per_file,
+        }
+        write_json(os.path.join(derived_dir, "summary.json"), summary)
+
+        tsv_path = os.path.join(derived_dir, "summary.tsv")
+        tsv_header = [
+            "ont_i",
+            "category",
+            "default_covered_ids",
+            "wrote_pred_records",
+            "eval_records",
+            "gold_triples",
+            "tp",
+            "fp",
+            "fn",
+            "precision",
+            "recall",
+            "f1",
+            "id_tp",
+            "id_fp",
+            "id_fn",
+            "id_precision",
+            "id_recall",
+            "id_f1",
+            "pred_path",
+            "pred_subset_path",
+            "pred_with_ids_path",
+            "pred_with_ids_subset_path",
+            "gold_path",
+        ]
+        rows: List[Dict[str, Any]] = []
+        for r in per_file:
+            ev = r.get("eval") or {}
+            t = (ev.get("text") or {})
+            tid = ev.get("id") or {}
+            gstat = ev.get("gold_stats") or {}
+            rows.append(
+                {
+                    "ont_i": r.get("ont_i", ""),
+                    "category": r.get("category", ""),
+                    "default_covered_ids": r.get("default_covered_ids", ""),
+                    "wrote_pred_records": r.get("wrote_pred_records", ""),
+                    "eval_records": gstat.get("eval_records", ""),
+                    "gold_triples": gstat.get("gold_triples", ""),
+                    "tp": t.get("tp", ""),
+                    "fp": t.get("fp", ""),
+                    "fn": t.get("fn", ""),
+                    "precision": t.get("precision", ""),
+                    "recall": t.get("recall", ""),
+                    "f1": t.get("f1", ""),
+                    "id_tp": tid.get("tp", ""),
+                    "id_fp": tid.get("fp", ""),
+                    "id_fn": tid.get("fn", ""),
+                    "id_precision": tid.get("precision", ""),
+                    "id_recall": tid.get("recall", ""),
+                    "id_f1": tid.get("f1", ""),
+                    "pred_path": r.get("pred_path", ""),
+                    "pred_subset_path": r.get("pred_subset_path", ""),
+                    "pred_with_ids_path": r.get("pred_with_ids_path", ""),
+                    "pred_with_ids_subset_path": r.get("pred_with_ids_subset_path", ""),
+                    "gold_path": r.get("gold_path", ""),
+                }
+            )
+        write_tsv(tsv_path, tsv_header, rows)
+        print(f"summary (no_verification_with_default_eval_ids): {os.path.join(derived_dir, 'summary.json')}")
+        print(f"tsv (no_verification_with_default_eval_ids): {tsv_path}")
+
 
 def _parse_proxy_host(url: str) -> str:
     s = (url or "").strip()
@@ -1281,6 +1677,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--only-prefix", default="", help="指定した prefix（例: default）の pred のみ対象にします。")
     ap.add_argument("--path-contains", default="", help="ディレクトリパスにこの文字列を含む場所だけ探索します。")
+    ap.add_argument(
+        "--no-verification-results-dir",
+        default=AUTO,
+        help="no_verification の pred 探索の起点（auto の場合は --results-dir と同じ）。",
+    )
+    ap.add_argument(
+        "--no-verification-path-contains",
+        default="",
+        help="no_verification の探索時のみ適用する path_contains（空なら --path-contains と同じ）。",
+    )
 
     ap.add_argument(
         "--gold-dir",
@@ -1297,6 +1703,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--pred-with-ids-dir",
         default=AUTO,
         help="ID評価用 with_ids のディレクトリ。auto の場合は <out_dir>/with_ids があればそれを使います。",
+    )
+    ap.add_argument(
+        "--no-verification-with-ids-dir",
+        default=AUTO,
+        help="no_verification の ID評価用 with_ids ディレクトリ（auto の場合は --pred-with-ids-dir と同じ）。",
     )
 
     ap.add_argument("--endpoint", default="https://www.wikidata.org/w/api.php", help="Wikidata API のエンドポイント。")
