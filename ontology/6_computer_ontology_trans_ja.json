@@ -1,0 +1,130 @@
+{
+  "title": "Computer Ontology",
+  "id": "ont_6_computer",
+  "concepts": [
+    {
+      "qid": "Q68",
+      "label": "computer",
+      "label_ja": "コンピュータ",
+      "label_wiki_ja": "コンピュータ"
+    },
+    {
+      "qid": "Q7397",
+      "label": "software",
+      "label_ja": "ソフトウェア",
+      "label_wiki_ja": "ソフトウェア"
+    },
+    {
+      "qid": "Q3966",
+      "label": "computer hardware",
+      "label_ja": "コンピューター・ハードウェア",
+      "label_wiki_ja": "コンピューター・ハードウェア"
+    },
+    {
+      "qid": "Q9143",
+      "label": "programming language",
+      "label_ja": "プログラミング言語",
+      "label_wiki_ja": "プログラミング言語"
+    },
+    {
+      "qid": "Q8513",
+      "label": "database",
+      "label_ja": "データベース",
+      "label_wiki_ja": "データベース"
+    },
+    {
+      "qid": "Q1301371",
+      "label": "computer network",
+      "label_ja": "コンピューター・ネットワーク",
+      "label_wiki_ja": "コンピューター・ネットワーク"
+    },
+    {
+      "qid": "Q189210",
+      "label": "web application",
+      "label_ja": "ウェブアプリケーション",
+      "label_wiki_ja": "ウェブアプリケーション"
+    },
+    {
+      "qid": "Q41455",
+      "label": "computer science",
+      "label_ja": "計算機科学",
+      "label_wiki_ja": "スネアーズ諸島"
+    },
+    {
+      "qid": "Q8366",
+      "label": "algorithm",
+      "label_ja": "アルゴリズム",
+      "label_wiki_ja": "アルゴリズム"
+    },
+    {
+      "qid": "Q166142",
+      "label": "application",
+      "label_ja": "アプリケーションソフトウェア",
+      "label_wiki_ja": "アプリケーションソフトウェア"
+    },
+    {
+      "qid": "Q215627",
+      "label": "person",
+      "label_ja": "人",
+      "label_wiki_ja": "人"
+    },
+    {
+      "qid": "Q5",
+      "label": "human",
+      "label_ja": "ヒト",
+      "label_wiki_ja": "ヒト"
+    },
+    {
+      "qid": "Q55990535",
+      "label": "computer model",
+      "label_ja": "コンピュータ・モデル",
+      "label_wiki_ja": "コンピュータ・モデル"
+    },
+    {
+      "qid": "Q1709010",
+      "label": "software engineer",
+      "label_ja": "ソフトウェアエンジニア",
+      "label_wiki_ja": "ソフトウェア工学者"
+    },
+    {
+      "qid": "Q9135",
+      "label": "operating system",
+      "label_ja": "オペレーティング・システム",
+      "label_wiki_ja": "オペレーティングシステム"
+    }
+  ],
+  "relations": [
+    {
+      "pid": "P178",
+      "label": "developer",
+      "domain": "Q7397",
+      "range": "Q4830453",
+      "label_ja": "開発元",
+      "label_wiki_ja": "開発元"
+    },
+    {
+      "pid": "P170",
+      "label": "creator",
+      "domain": "Q166142",
+      "range": "Q5",
+      "label_ja": "作者",
+      "label_wiki_ja": "作者"
+    },
+    {
+      "pid": "P400",
+      "label": "platform",
+      "domain": "Q7397",
+      "range": "Q68",
+      "label_ja": "プラットフォーム",
+      "label_wiki_ja": "プラットフォーム"
+    },
+    {
+      "pid": "P306",
+      "label": "operating system",
+      "domain": "Q55990535",
+      "range": "Q9135",
+      "label_ja": "オペレーティングシステム",
+      "label_wiki_ja": "オペレーティングシステム"
+    }
+  ]
+}

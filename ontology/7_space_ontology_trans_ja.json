@@ -1,0 +1,154 @@
+{
+  "title": "Space Ontology",
+  "id": "ont_7_space",
+  "concepts": [
+    {
+      "qid": "Q4169",
+      "label": "outer space",
+      "label_ja": "宇宙空間",
+      "label_wiki_ja": "宇宙空間"
+    },
+    {
+      "qid": "Q634",
+      "label": "planet",
+      "label_ja": "惑星",
+      "label_wiki_ja": "惑星"
+    },
+    {
+      "qid": "Q2488",
+      "label": "spiral galaxy",
+      "label_ja": "渦巻銀河",
+      "label_wiki_ja": "渦巻銀河"
+    },
+    {
+      "qid": "Q8928",
+      "label": "constellation",
+      "label_ja": "星座",
+      "label_wiki_ja": "星座"
+    },
+    {
+      "qid": "Q109228604",
+      "label": "Celestial bodies",
+      "label_ja": "天体",
+      "label_wiki_ja": "None JP Label"
+    },
+    {
+      "qid": "Q3863",
+      "label": "asteroid",
+      "label_ja": "小惑星",
+      "label_wiki_ja": "小惑星"
+    },
+    {
+      "qid": "Q205892",
+      "label": "calendar date",
+      "label_ja": "カレンダーの日付",
+      "label_wiki_ja": "日付"
+    },
+    {
+      "qid": "Q11631",
+      "label": "astronaut",
+      "label_ja": "宇宙飛行士",
+      "label_wiki_ja": "宇宙飛行士"
+    },
+    {
+      "qid": "Q2133344",
+      "label": "space mission",
+      "label_ja": "宇宙探査ミッション",
+      "label_wiki_ja": "宇宙探査ミッション"
+    },
+    {
+      "qid": "Q62832",
+      "label": "observatory",
+      "label_ja": "天文台",
+      "label_wiki_ja": "観測所"
+    },
+    {
+      "qid": "Q40218",
+      "label": "Spacecraft",
+      "label_ja": "宇宙機",
+      "label_wiki_ja": "宇宙機"
+    },
+    {
+      "qid": "Q5916",
+      "label": "spaceflight",
+      "label_ja": "宇宙飛行",
+      "label_wiki_ja": "宇宙飛行"
+    },
+    {
+      "qid": "Q17444909",
+      "label": "astronomical object type",
+      "label_ja": "天体の種類",
+      "label_wiki_ja": "天体の種類"
+    },
+    {
+      "qid": "Q5",
+      "label": "human",
+      "label_ja": "ヒト",
+      "label_wiki_ja": "ヒト"
+    },
+    {
+      "qid": "Q82794",
+      "label": "geographic region",
+      "label_ja": "地理的地域",
+      "label_wiki_ja": "地域"
+    }
+  ],
+  "relations": [
+    {
+      "pid": "P65",
+      "label": "site of astronomical discovery",
+      "domain": "Q3863",
+      "range": "Q62832",
+      "label_ja": "天文学的な発見の場所",
+      "label_wiki_ja": "天文学的発見をした場所"
+    },
+    {
+      "pid": "P196",
+      "label": "minor planet group",
+      "domain": "Q3863",
+      "range": "Q17444909",
+      "label_ja": "小惑星群",
+      "label_wiki_ja": "小惑星グループ"
+    },
+    {
+      "pid": "P59",
+      "label": "constellation",
+      "domain": "Q2488",
+      "range": "Q8928",
+      "label_ja": "星座",
+      "label_wiki_ja": "星座"
+    },
+    {
+      "pid": "P450",
+      "label": "astronaut mission",
+      "domain": "Q5",
+      "range": "Q5916",
+      "label_ja": "宇宙飛行士の任務（搭乗ミッション）",
+      "label_wiki_ja": "宇宙飛行士のミッション"
+    },
+    {
+      "pid": "P622",
+      "label": "spacecraft docking/undocking date",
+      "domain": "Q40218",
+      "range": "",
+      "label_ja": "宇宙船のドッキング／アンドッキング日（接舷／離脱日）",
+      "label_wiki_ja": "宇宙機結合・分離日時"
+    },
+    {
+      "pid": "P3015",
+      "label": "backup or reserve team or crew",
+      "domain": "Q5916",
+      "range": "Q5",
+      "label_ja": "予備チーム／予備乗組員",
+      "label_wiki_ja": "None JP Label"
+    },
+    {
+      "pid": "P1158",
+      "label": "location of landing",
+      "domain": "Q40218",
+      "range": "Q82794",
+      "label_ja": "着陸地点",
+      "label_wiki_ja": "着地点"
+    }
+  ]
+}

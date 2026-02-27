@@ -1,0 +1,517 @@
+from __future__ import annotations
+
+import json
+import os
+import re
+import string
+import difflib
+from dataclasses import dataclass
+from functools import lru_cache
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from llm.llmjp_client import get_llmjp_http_for
+
+PID_RE = re.compile(r"^P\d+$")
+QID_RE = re.compile(r"^Q\d+$")
+
+_VERDICT_SCHEMA: Dict[str, Any] = {
+    "type": "object",
+    "properties": {"verdict": {"type": "integer"}},
+    "required": ["verdict"],
+    "additionalProperties": False,
+}
+
+
+@dataclass(frozen=True)
+class PromptTemplate:
+    prompt_id: str
+    prompt_name: str
+    prompt_text: str
+    arg_names: Tuple[str, ...]
+
+
+def normalize_text(s: Optional[str]) -> str:
+    if s is None:
+        return ""
+    return " ".join(str(s).strip().split())
+
+
+class _SafeDict(dict):
+    def __missing__(self, key: str) -> str:
+        return ""
+
+
+def render_prompt(template: PromptTemplate, values: Dict[str, Any]) -> str:
+    formatter = string.Formatter()
+    keys = {fname for _, fname, _, _ in formatter.parse(template.prompt_text) if fname}
+    safe_values = {k: (values.get(k, "") or "") for k in keys}
+    try:
+        return template.prompt_text.format_map(_SafeDict(safe_values))
+    except Exception:
+        out = template.prompt_text
+        for k, v in safe_values.items():
+            out = out.replace("{" + k + "}", str(v))
+        return out
+
+
+def _load_json(path: str) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+@lru_cache(maxsize=2)
+def load_prompt_templates(prompts_json_path: str) -> Dict[str, PromptTemplate]:
+    data = _load_json(prompts_json_path)
+    out: Dict[str, PromptTemplate] = {}
+    for p in data.get("prompts", []):
+        pid = normalize_text(p.get("id"))
+        if not pid:
+            continue
+        arg_names = tuple(a.get("name", "") for a in p.get("argument_elements", []) if a.get("name"))
+        out[pid] = PromptTemplate(
+            prompt_id=pid,
+            prompt_name=str(p.get("prompt_name", "")),
+            prompt_text=str(p.get("prompt_text", "")),
+            arg_names=arg_names,
+        )
+    return out
+
+
+@lru_cache(maxsize=2)
+def load_relation_prompt_map(mapping_json_path: str) -> Dict[str, Any]:
+    return _load_json(mapping_json_path)
+
+
+@lru_cache(maxsize=16)
+def load_ontology_labels(ontology_dir: str, ontology_id: str) -> Dict[str, str]:
+    ont_id = normalize_text(ontology_id)
+    if not ont_id:
+        return {}
+
+    candidates: List[str] = []
+    if ont_id.startswith("ont_"):
+        candidates.append(f"{ont_id[4:]}_ontology_trans_ja.json")
+    candidates.append(f"{ont_id}_ontology_trans_ja.json")
+
+    for fname in candidates:
+        path = os.path.join(ontology_dir, fname)
+        if os.path.exists(path):
+            data = _load_json(path)
+            labels: Dict[str, str] = {}
+            for c in data.get("concepts", []):
+                qid = normalize_text(c.get("qid"))
+                if not qid:
+                    continue
+                label = (
+                    normalize_text(c.get("label_ja"))
+                    or normalize_text(c.get("label_wiki_ja"))
+                    or normalize_text(c.get("label"))
+                    or qid
+                )
+                labels[qid] = label
+            return labels
+    return {}
+
+@lru_cache(maxsize=16)
+def load_ontology_relation_aliases(ontology_dir: str, ontology_id: str) -> Dict[str, str]:
+    """
+    Ontologyファイル（*_ontology_trans_ja.json）の relations から、
+    label_ja / label_wiki_ja / label を alias として収集し、
+    alias -> pid（1対1で一意なもののみ）を返す。
+    """
+    ont_id = normalize_text(ontology_id)
+    if not ont_id:
+        return {}
+
+    candidates: List[str] = []
+    if ont_id.startswith("ont_"):
+        candidates.append(f"{ont_id[4:]}_ontology_trans_ja.json")
+    candidates.append(f"{ont_id}_ontology_trans_ja.json")
+
+    for fname in candidates:
+        path = os.path.join(ontology_dir, fname)
+        if not os.path.exists(path):
+            continue
+        try:
+            data = _load_json(path)
+        except Exception:
+            continue
+
+        alias_to_pids: Dict[str, set[str]] = {}
+        for r in data.get("relations", []) or []:
+            pid = normalize_text(r.get("pid"))
+            if not pid:
+                continue
+            for k in ("label_ja", "label_wiki_ja", "label"):
+                a = normalize_text(r.get(k))
+                if not a:
+                    continue
+                alias_to_pids.setdefault(a, set()).add(pid)
+
+        out: Dict[str, str] = {}
+        for a, pids in alias_to_pids.items():
+            if len(pids) == 1:
+                out[a] = next(iter(pids))
+        return out
+
+    return {}
+
+@lru_cache(maxsize=16)
+def load_ontology_relation_canonical_labels(ontology_dir: str, ontology_id: str) -> Dict[str, str]:
+    """
+    Ontologyファイル（*_ontology_trans_ja.json）の relations から、
+    pid -> canonical_label を返す。
+    canonical_label は label_wiki_ja を優先し、無ければ label_ja、無ければ label を使う。
+    """
+    ont_id = normalize_text(ontology_id)
+    if not ont_id:
+        return {}
+
+    candidates: List[str] = []
+    if ont_id.startswith("ont_"):
+        candidates.append(f"{ont_id[4:]}_ontology_trans_ja.json")
+    candidates.append(f"{ont_id}_ontology_trans_ja.json")
+
+    for fname in candidates:
+        path = os.path.join(ontology_dir, fname)
+        if not os.path.exists(path):
+            continue
+        try:
+            data = _load_json(path)
+        except Exception:
+            continue
+
+        out: Dict[str, str] = {}
+        for r in data.get("relations", []) or []:
+            pid = normalize_text(r.get("pid"))
+            if not pid:
+                continue
+            label = (
+                normalize_text(r.get("label_wiki_ja"))
+                or normalize_text(r.get("label_ja"))
+                or normalize_text(r.get("label"))
+                or pid
+            )
+            out[pid] = label
+        return out
+
+    return {}
+
+
+class RelationPromptResolver:
+    def __init__(self, mapping_json_path: str, prompts_json_path: str, ontology_dir: str) -> None:
+        self.mapping = load_relation_prompt_map(mapping_json_path)
+        self.prompts = load_prompt_templates(prompts_json_path)
+        self.ontology_dir = ontology_dir
+
+        rows = self.mapping.get("rows", [])
+        self._rows = rows
+
+        by_pid: Dict[str, List[Dict[str, Any]]] = {}
+        by_predicate: Dict[str, List[Dict[str, Any]]] = {}
+        by_ontology_pid: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        by_ontology_predicate: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        by_ontology_alias: Dict[Tuple[str, str], Dict[str, Any]] = {}
+
+        for row in rows:
+            ont = normalize_text(row.get("ontology_id"))
+            pid = normalize_text(row.get("pid"))
+            pred = normalize_text(row.get("predicate_ja"))
+            if pid:
+                by_pid.setdefault(pid, []).append(row)
+                if ont:
+                    by_ontology_pid[(ont, pid)] = row
+            if pred:
+                by_predicate.setdefault(pred, []).append(row)
+                if ont:
+                    by_ontology_predicate[(ont, pred)] = row
+
+        # Add ontology relation labels (label_ja / label_wiki_ja) as acceptable aliases.
+        # These map to pid in ontology/*.json; then pid is mapped to a prompt row here.
+        onto_ids = sorted({normalize_text(r.get("ontology_id")) for r in rows if normalize_text(r.get("ontology_id"))})
+        for ont in onto_ids:
+            alias_pid = load_ontology_relation_aliases(self.ontology_dir, ont)
+            for alias, pid in (alias_pid or {}).items():
+                row = by_ontology_pid.get((ont, pid))
+                if row:
+                    by_ontology_alias[(ont, alias)] = row
+
+        self._by_pid = by_pid
+        self._by_predicate = by_predicate
+        self._by_ontology_pid = by_ontology_pid
+        self._by_ontology_predicate = by_ontology_predicate
+        self._by_ontology_alias = by_ontology_alias
+
+    def get_prompt(self, prompt_id: str) -> Optional[PromptTemplate]:
+        return self.prompts.get(normalize_text(prompt_id))
+
+    def canonical_relation_label(self, row: Dict[str, Any], ontology_id: Optional[str]) -> str:
+        ont = normalize_text(ontology_id) if ontology_id else normalize_text(row.get("ontology_id"))
+        pid = normalize_text(row.get("pid"))
+        if not (ont and pid):
+            return normalize_text(row.get("predicate_ja")) or pid or ""
+        m = load_ontology_relation_canonical_labels(self.ontology_dir, ont)
+        return normalize_text(m.get(pid)) or normalize_text(row.get("predicate_ja")) or pid
+
+    def _fuzzy_threshold(self) -> float:
+        s = os.getenv("RELATION_FUZZY_THRESHOLD", "0.78")
+        try:
+            v = float(s)
+        except Exception:
+            v = 0.78
+        return max(0.0, min(1.0, v))
+
+    def _resolve_fuzzy(self, rel: str, ontology_id: str) -> Optional[Dict[str, Any]]:
+        """Fuzzy match relation string to known predicates/aliases for a given ontology_id."""
+        if not rel:
+            return None
+        ont = normalize_text(ontology_id)
+        if not ont:
+            return None
+
+        # Candidate strings -> row (unique only).
+        candidates: Dict[str, Dict[str, Any]] = {}
+        for (o, pred), row in self._by_ontology_predicate.items():
+            if o != ont:
+                continue
+            candidates[pred] = row
+        for (o, alias), row in self._by_ontology_alias.items():
+            if o != ont:
+                continue
+            candidates.setdefault(alias, row)
+
+        if not candidates:
+            return None
+
+        thr = self._fuzzy_threshold()
+        best = None
+        best_score = -1.0
+        second_score = -1.0
+
+        for cand, row in candidates.items():
+            if not cand:
+                continue
+            # Prefer containment for inflection-like variants (e.g., 監督し vs 監督).
+            if (cand in rel) or (rel in cand):
+                score = 1.0
+            else:
+                score = difflib.SequenceMatcher(None, rel, cand).ratio()
+            if score > best_score:
+                second_score = best_score
+                best_score = score
+                best = row
+            elif score > second_score:
+                second_score = score
+
+        # Accept only when above threshold and not ambiguous.
+        if best is None:
+            return None
+        if best_score < thr:
+            return None
+        # Require a small margin to avoid accidental ties.
+        if (best_score - second_score) < 0.05:
+            return None
+        return best
+
+    def resolve_relation_row(self, relation: str, ontology_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        rel = normalize_text(relation)
+        if not rel:
+            return None
+        ont = normalize_text(ontology_id) if ontology_id else ""
+
+        if PID_RE.match(rel):
+            if ont:
+                hit = self._by_ontology_pid.get((ont, rel))
+                if hit:
+                    return hit
+            rows = self._by_pid.get(rel, [])
+        else:
+            if ont:
+                hit = self._by_ontology_alias.get((ont, rel))
+                if hit:
+                    return hit
+                hit = self._by_ontology_predicate.get((ont, rel))
+                if hit:
+                    return hit
+            rows = self._by_predicate.get(rel, [])
+
+        if len(rows) == 1:
+            return rows[0]
+        # Fuzzy fallback (ontology-scoped).
+        if ont:
+            return self._resolve_fuzzy(rel, ont)
+        return None
+
+    def resolve_concepts(self, row: Dict[str, Any], ontology_id: Optional[str]) -> Tuple[str, str]:
+        ont = normalize_text(ontology_id) if ontology_id else normalize_text(row.get("ontology_id"))
+        labels = load_ontology_labels(self.ontology_dir, ont) if ont else {}
+
+        domain_concept = normalize_text(row.get("domain_concept_ja"))
+        range_concept = normalize_text(row.get("range_concept_ja"))
+        domain_qid = normalize_text(row.get("domain_qid"))
+        range_qid = normalize_text(row.get("range_qid"))
+
+        domain = domain_concept
+        if (not domain) or QID_RE.match(domain):
+            qid = domain if QID_RE.match(domain) else domain_qid
+            domain = labels.get(qid, qid) if qid else domain
+
+        range_ = range_concept
+        if (not range_) or QID_RE.match(range_):
+            qid = range_ if QID_RE.match(range_) else range_qid
+            range_ = labels.get(qid, qid) if qid else range_
+
+        return domain or "", range_ or ""
+
+
+@dataclass(frozen=True)
+class OntologyJudgeConfig:
+    # When None, use the model configured on the underlying HTTP client (LLMJPHTTPClient.model),
+    # which is resolved via LLMJP_ONTO_MODEL -> LLMJP_MODEL -> default.
+    model: Optional[str] = None
+    max_tokens: int = 64
+    temperature: float = 0.0
+    cache_size: int = 4096
+
+
+class OntologyJudgeLLMJP:
+    def __init__(self, cfg: Optional[OntologyJudgeConfig] = None) -> None:
+        self.cfg = cfg or OntologyJudgeConfig()
+        # Use ontology-specific vLLM endpoint(s) for better throughput and scaling.
+        self.client = get_llmjp_http_for("onto")
+        # Cache must include generation params; otherwise temperature/max_tokens overrides would be mixed.
+        self._judge_cached = lru_cache(maxsize=self.cfg.cache_size)(self._judge_uncached_keyed)
+        self.last_error: Optional[str] = None
+        self.last_meta: Dict[str, Any] = {}
+        self._strict = str(os.getenv("ONTOLOGY_VERIFY_STRICT", "1")).strip().lower() not in ("0", "false", "no", "")
+
+    def judge_prompt(
+        self,
+        prompt_text: str,
+        *,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+    ) -> int:
+        self.last_error = None
+        # Clear request metadata so cache hits don't inherit previous request values.
+        try:
+            setattr(self.client, "last_base_url", None)
+            setattr(self.client, "last_url", None)
+        except Exception:
+            pass
+        eff_temp = float(self.cfg.temperature if (temperature is None) else temperature)
+        eff_max_tokens = int(self.cfg.max_tokens if (max_tokens is None) else max_tokens)
+        model_used = (self.cfg.model or getattr(self.client, "model", None) or "")
+        self.last_meta = {
+            "cached": False,
+            "model_used": (model_used or None),
+            "base_urls": getattr(self.client, "base_urls", None),
+            "base_url": getattr(self.client, "last_base_url", None),
+            "request_url": getattr(self.client, "last_url", None),
+            "temperature": eff_temp,
+            "max_tokens": eff_max_tokens,
+        }
+        if not prompt_text:
+            return 0
+
+        # Detect cache hit/miss for logging (best-effort).
+        cached = False
+        try:
+            before = self._judge_cached.cache_info()
+        except Exception:
+            before = None
+        try:
+            out = int(self._judge_cached(prompt_text, eff_temp, eff_max_tokens, model_used))
+        except Exception as e:
+            self.last_error = f"{type(e).__name__}: {e}"
+            self.last_meta.update(
+                {
+                    "cached": False,
+                    "base_url": getattr(self.client, "last_base_url", None),
+                    "request_url": getattr(self.client, "last_url", None),
+                    "error": self.last_error,
+                }
+            )
+            if self._strict:
+                mu = self.last_meta.get("model_used")
+                bu = self.last_meta.get("base_url")
+                ru = self.last_meta.get("request_url")
+                raise RuntimeError(
+                    f"ontology verify failed (model={mu!r} base_url={bu!r} request_url={ru!r}): {self.last_error}"
+                ) from e
+            return 0
+        finally:
+            try:
+                after = self._judge_cached.cache_info()
+                if before and after and (after.hits > before.hits):
+                    cached = True
+            except Exception:
+                cached = False
+            self.last_meta["cached"] = cached
+            self.last_meta["base_url"] = getattr(self.client, "last_base_url", None)
+            self.last_meta["request_url"] = getattr(self.client, "last_url", None)
+        return out
+
+    def _judge_uncached_keyed(self, prompt_text: str, temperature: float, max_tokens: int, model_used: str) -> int:
+        messages = [{"role": "user", "content": prompt_text}]
+        try:
+            obj = self.client.chat_json(
+                messages,
+                json_schema=_VERDICT_SCHEMA,
+                schema_name="ontology-verify",
+                # IMPORTANT: Do not override onto server's served model name by default.
+                # When cfg.model is None, let the underlying client decide (LLMJP_ONTO_MODEL etc.).
+                model=self.cfg.model,
+                max_tokens=int(max_tokens),
+                temperature=float(temperature),
+            )
+        except Exception as e:
+            self.last_error = f"{type(e).__name__}: {e}"
+            self.last_meta.update(
+                {
+                    "cached": False,
+                    "model_used": (self.cfg.model or getattr(self.client, "model", None)),
+                    "base_urls": getattr(self.client, "base_urls", None),
+                    "base_url": getattr(self.client, "last_base_url", None),
+                    "request_url": getattr(self.client, "last_url", None),
+                    "error": self.last_error,
+                }
+            )
+            if self._strict:
+                raise
+            return 0
+
+        v = obj.get("verdict", 0)
+        if isinstance(v, bool):
+            return 1 if v else 0
+        if isinstance(v, (int, float)):
+            return int(v)
+        if isinstance(v, str):
+            s = v.strip()
+            if s.isdigit() or (s.startswith("-") and s[1:].isdigit()):
+                try:
+                    return int(s)
+                except Exception:
+                    return 0
+        return 0
+
+
+def prompt_requires_pair(template: PromptTemplate) -> bool:
+    return ("arg1" in template.arg_names) and ("arg2" in template.arg_names)
+
+
+def pick_other_argument(args: List[str], current: str) -> str:
+    for a in args:
+        if a != current:
+            return a
+    return "NULL"
+
+
+@lru_cache(maxsize=2)
+def get_ontology_resolver(mapping_json_path: str, prompts_json_path: str, ontology_dir: str) -> RelationPromptResolver:
+    return RelationPromptResolver(mapping_json_path, prompts_json_path, ontology_dir)
+
+
+@lru_cache(maxsize=1)
+def get_ontology_judge() -> OntologyJudgeLLMJP:
+    return OntologyJudgeLLMJP()

@@ -1,0 +1,188 @@
+services:
+  pytorch:
+    container_name: mi24a008-KG-framework-pytorch
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - http_tmp=$http_proxy
+        - https_tmp=$https_proxy
+
+    volumes:
+      - ..:/workspace
+      - hf_cache:/workspace/.cache
+
+    working_dir: /workspace
+    command: /bin/bash
+
+    env_file:
+      - .env
+
+    tty: true
+    stop_signal: SIGINT
+    shm_size: 12GB
+
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - HF_HUB_ENABLE_HF_TRANSFER=0
+      - HF_HOME=/workspace/.cache/huggingface
+      - TRANSFORMERS_CACHE=/workspace/.cache/huggingface/transformers
+      - HF_DATASETS_CACHE=/workspace/.cache/huggingface/datasets
+      - TOKENIZERS_PARALLELISM=false
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              device_ids: ["0"]
+
+    depends_on:
+      - llmjp
+      - llmjp_onto
+      - llmjp_onto2
+
+  # 既存: CKY 並列検証などに使う llm-jp
+  llmjp:
+    image: vllm/vllm-openai:latest
+    container_name: mi24a008-llmjp-vllm
+    ipc: host
+
+    volumes:
+      - hf_cache:/root/.cache
+
+    env_file:
+      - .env
+
+    environment:
+      - HF_HOME=/root/.cache/huggingface
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/transformers
+      - HF_HUB_ENABLE_HF_TRANSFER=0
+
+    ports:
+      - "8000:8000"
+
+    command:
+      - --model
+      - llm-jp/llm-jp-3.1-13b-instruct4
+      - --served-model-name
+      - llmjp-13b
+      - --dtype
+      - half
+      - --max-model-len
+      - "4096"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --gpu-memory-utilization
+      - "0.90"
+      - --api-key
+      - local-token
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              device_ids: ["1"]
+
+  # 既存: オントロジー整合性検証用 llm-jp（別GPU・別ポート）
+  llmjp_onto:
+    image: vllm/vllm-openai:latest
+    container_name: mi24a008-llmjp-vllm-onto
+    ipc: host
+
+    volumes:
+      - hf_cache:/root/.cache
+
+    env_file:
+      - .env
+
+    environment:
+      - HF_HOME=/root/.cache/huggingface
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/transformers
+      - HF_HUB_ENABLE_HF_TRANSFER=0
+
+    # ホスト側は 8001、コンテナ内は 8000 のまま
+    ports:
+      - "8001:8000"
+
+    command:
+      - --model
+      - llm-jp/llm-jp-3.1-13b-instruct4
+      - --served-model-name
+      - llmjp-13b-onto
+      - --dtype
+      - half
+      - --max-model-len
+      - "4096"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --gpu-memory-utilization
+      - "0.90"
+      - --api-key
+      - local-token
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              device_ids: ["2"]
+
+  # 追加: オントロジー整合性検証用 llm-jp その2（別GPU・別ポート）
+  llmjp_onto2:
+    image: vllm/vllm-openai:latest
+    container_name: mi24a008-llmjp-vllm-onto2
+    ipc: host
+
+    volumes:
+      - hf_cache:/root/.cache
+
+    env_file:
+      - .env
+
+    environment:
+      - HF_HOME=/root/.cache/huggingface
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/transformers
+      - HF_HUB_ENABLE_HF_TRANSFER=0
+
+    # ホスト側は 8002、コンテナ内は 8000 のまま
+    ports:
+      - "8002:8000"
+
+    command:
+      - --model
+      - llm-jp/llm-jp-3.1-13b-instruct4
+      - --served-model-name
+      # NOTE: Must match LLMJP_ONTO_MODEL (docker/.env) so the client can round-robin safely.
+      - llmjp-13b-onto
+      - --dtype
+      - half
+      - --max-model-len
+      - "4096"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --gpu-memory-utilization
+      - "0.90"
+      - --api-key
+      - local-token
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              device_ids: ["3"]
+
+volumes:
+  hf_cache:

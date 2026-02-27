@@ -1,0 +1,190 @@
+{
+  "title": "Music Ontology",
+  "id": "ont_2_music",
+  "concepts": [
+    {
+      "qid": "Q5",
+      "label": "human",
+      "label_ja": "ヒト",
+      "label_wiki_ja": "ヒト"
+    },
+    {
+      "qid": "Q638",
+      "label": "music",
+      "label_ja": "音楽",
+      "label_wiki_ja": "音楽"
+    },
+    {
+      "qid": "Q2188189",
+      "label": "musical work",
+      "label_ja": "音楽作品",
+      "label_wiki_ja": "音楽作品"
+    },
+    {
+      "qid": "Q4830453",
+      "label": "record producer",
+      "label_ja": "レコードプロデューサー",
+      "label_wiki_ja": "企業"
+    },
+    {
+      "qid": "Q207628",
+      "label": "composed musical work",
+      "label_ja": "楽曲",
+      "label_wiki_ja": "楽曲"
+    },
+    {
+      "qid": "Q36834",
+      "label": "composer",
+      "label_ja": "作曲家",
+      "label_wiki_ja": "作曲家"
+    },
+    {
+      "qid": "Q34770",
+      "label": "language",
+      "label_ja": "言語",
+      "label_wiki_ja": "言語"
+    },
+    {
+      "qid": "Q188451",
+      "label": "music genre",
+      "label_ja": "音楽のジャンル",
+      "label_wiki_ja": "音楽のジャンル"
+    },
+    {
+      "qid": "Q7390",
+      "label": "voice",
+      "label_ja": "声",
+      "label_wiki_ja": "声"
+    },
+    {
+      "qid": "Q164204",
+      "label": "musicology",
+      "label_ja": "音楽学",
+      "label_wiki_ja": "音楽学"
+    },
+    {
+      "qid": "Q746359",
+      "label": "music industry",
+      "label_ja": "音楽業界",
+      "label_wiki_ja": "音楽産業"
+    },
+    {
+      "qid": "Q482994",
+      "label": "album",
+      "label_ja": "アルバム",
+      "label_wiki_ja": "アルバム"
+    },
+    {
+      "qid": "Q618779",
+      "label": "award ",
+      "label_ja": "賞",
+      "label_wiki_ja": "賞"
+    }
+  ],
+  "relations": [
+    {
+      "pid": "P86",
+      "label": "composer",
+      "domain": "Q2188189",
+      "range": "Q5",
+      "label_ja": "作曲家",
+      "label_wiki_ja": "作曲者"
+    },
+    {
+      "pid": "P361",
+      "label": "part of",
+      "domain": "Q2188189",
+      "range": "Q482994",
+      "label_ja": "一部",
+      "label_wiki_ja": "以下の一部分"
+    },
+    {
+      "pid": "P676",
+      "label": "lyrics by",
+      "domain": "Q2188189",
+      "range": "Q5",
+      "label_ja": "歌詞",
+      "label_wiki_ja": "作詞者"
+    },
+    {
+      "pid": "P577",
+      "label": "publication date",
+      "domain": "Q2188189",
+      "range": "",
+      "label_ja": "公開日",
+      "label_wiki_ja": "出版日"
+    },
+    {
+      "pid": "P407",
+      "label": "language of work or name",
+      "domain": "Q2188189",
+      "range": "Q34770",
+      "label_ja": "仕事または名前の言語",
+      "label_wiki_ja": "作品または名前の言語"
+    },
+    {
+      "pid": "P412",
+      "label": "voice type",
+      "domain": "Q5",
+      "range": "Q7390",
+      "label_ja": "音声タイプ",
+      "label_wiki_ja": "声域"
+    },
+    {
+      "pid": "P870",
+      "label": "instrumentation",
+      "domain": "Q2188189",
+      "range": "",
+      "label_ja": "計装",
+      "label_wiki_ja": "使用楽器"
+    },
+    {
+      "pid": "P658",
+      "label": "tracklist",
+      "domain": "Q482994",
+      "range": "Q2188189",
+      "label_ja": "トラックリスト",
+      "label_wiki_ja": "収録曲"
+    },
+    {
+      "pid": "P136",
+      "label": "genre",
+      "domain": "Q2188189",
+      "range": "Q188451",
+      "label_ja": "ジャンル",
+      "label_wiki_ja": "ジャンル"
+    },
+    {
+      "pid": "P175",
+      "label": "performer",
+      "domain": "Q2188189",
+      "range": "",
+      "label_ja": "パフォーマー",
+      "label_wiki_ja": "演者・演奏者・歌手"
+    },
+    {
+      "pid": "P162",
+      "label": "producer",
+      "domain": "Q482994",
+      "range": "",
+      "label_ja": "プロデューサー",
+      "label_wiki_ja": "プロデューサー"
+    },
+    {
+      "pid": "P1411",
+      "label": "nominated for",
+      "domain": "Q482994",
+      "range": "Q618779",
+      "label_ja": "ノミネートされました",
+      "label_wiki_ja": "ノミネート"
+    },
+    {
+      "pid": "P264",
+      "label": "record label",
+      "domain": "Q482994",
+      "range": "",
+      "label_ja": "レコードレーベル",
+      "label_wiki_ja": "レコードレーベル"
+    }
+  ]
+}

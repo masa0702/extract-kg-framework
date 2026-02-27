@@ -1,0 +1,196 @@
+{
+  "title": "Nature Ontology",
+  "id": "ont_9_nature",
+  "concepts": [
+    {
+      "qid": "Q15091377",
+      "label": "cycling race",
+      "label_ja": "自転車レース",
+      "label_wiki_ja": "自転車レース"
+    },
+    {
+      "qid": "Q618123",
+      "label": "geographical feature",
+      "label_ja": "地理的特徴",
+      "label_wiki_ja": "地理的特徴"
+    },
+    {
+      "qid": "Q131681",
+      "label": "reservoir",
+      "label_ja": "貯水池",
+      "label_wiki_ja": "貯水池"
+    },
+    {
+      "qid": "Q52105",
+      "label": "Habitat",
+      "label_ja": "生息地",
+      "label_wiki_ja": "生息地"
+    },
+    {
+      "qid": "Q12323",
+      "label": "dam",
+      "label_ja": "ダム",
+      "label_wiki_ja": "ダム"
+    },
+    {
+      "qid": "Q166620",
+      "label": "drainage basin",
+      "label_ja": "流域",
+      "label_wiki_ja": "流域"
+    },
+    {
+      "qid": "Q46831",
+      "label": "mountain range",
+      "label_ja": "山脈",
+      "label_wiki_ja": "山脈"
+    },
+    {
+      "qid": "Q8502",
+      "label": "mountain",
+      "label_ja": "山",
+      "label_wiki_ja": "山"
+    },
+    {
+      "qid": "Q16521",
+      "label": "taxon",
+      "label_ja": "タクソン",
+      "label_wiki_ja": "タクソン"
+    },
+    {
+      "qid": "Q355304",
+      "label": "watercourse",
+      "label_ja": "流路",
+      "label_wiki_ja": "流路"
+    },
+    {
+      "qid": "Q82673",
+      "label": "conservation status",
+      "label_ja": "保全状況",
+      "label_wiki_ja": "保全状況"
+    },
+    {
+      "qid": "Q15324",
+      "label": "body of water",
+      "label_ja": "水域",
+      "label_wiki_ja": "水域"
+    },
+    {
+      "qid": "Q5",
+      "label": "human",
+      "label_ja": "ヒト",
+      "label_wiki_ja": "ヒト"
+    },
+    {
+      "qid": "Q1040689",
+      "label": "synonym",
+      "label_ja": "同義語",
+      "label_wiki_ja": "シノニム"
+    }
+  ],
+  "relations": [
+    {
+      "pid": "P171",
+      "label": "parent taxon",
+      "domain": "Q16521",
+      "range": "Q16521",
+      "label_ja": "親分類群",
+      "label_wiki_ja": "上位タクソン"
+    },
+    {
+      "pid": "P4552",
+      "label": "mountain range",
+      "domain": "Q8502",
+      "range": "Q46831",
+      "label_ja": "山脈",
+      "label_wiki_ja": "山脈"
+    },
+    {
+      "pid": "P3137",
+      "label": "parent peak",
+      "domain": "Q8502",
+      "range": "Q8502",
+      "label_ja": "親峰",
+      "label_wiki_ja": "主峰"
+    },
+    {
+      "pid": "P1843",
+      "label": "taxon common name",
+      "domain": "Q7432",
+      "range": "",
+      "label_ja": "分類群の一般名",
+      "label_wiki_ja": "一般名"
+    },
+    {
+      "pid": "P974",
+      "label": "tributary",
+      "domain": "Q355304",
+      "range": "Q355304",
+      "label_ja": "支流",
+      "label_wiki_ja": "支流"
+    },
+    {
+      "pid": "P885",
+      "label": "origin of the watercourse",
+      "domain": "Q355304",
+      "range": "Q15324",
+      "label_ja": "水源",
+      "label_wiki_ja": "水源"
+    },
+    {
+      "pid": "P403",
+      "label": "mouth of the watercourse",
+      "domain": "Q355304",
+      "range": "Q355304",
+      "label_ja": "河口",
+      "label_wiki_ja": "河口（河川の合流先）"
+    },
+    {
+      "pid": "P141",
+      "label": "IUCN conservation status",
+      "domain": "Q16521",
+      "range": "Q82673",
+      "label_ja": "IUCN保全状況",
+      "label_wiki_ja": "IUCN保全状況"
+    },
+    {
+      "pid": "P1420",
+      "label": "taxon synonym",
+      "domain": "Q16521",
+      "range": "Q1040689",
+      "label_ja": "分類群の同義語",
+      "label_wiki_ja": "シノニム"
+    },
+    {
+      "pid": "P4661",
+      "label": "reservoir created",
+      "domain": "Q12323",
+      "range": "Q131681",
+      "label_ja": "作成された貯水池",
+      "label_wiki_ja": "ダム湖"
+    },
+    {
+      "pid": "P4614",
+      "label": "drainage basin",
+      "domain": "Q355304",
+      "range": "Q166620",
+      "label_ja": "排水盆地",
+      "label_wiki_ja": "分水嶺"
+    },
+    {
+      "pid": "P4320",
+      "label": "mountains classification ",
+      "domain": "Q15091377",
+      "range": "Q5",
+      "label_ja": "山岳賞（山岳ポイント分類）",
+      "label_wiki_ja": "山岳賞"
+    },
+    {
+      "pid": "P2974",
+      "label": "Habitat",
+      "domain": "Q16521",
+      "range": "Q15324",
+      "label_ja": "生息地",
+      "label_wiki_ja": "生息地"
+    }
+  ]
+}

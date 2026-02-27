@@ -1,0 +1,162 @@
+{
+  "title": "Culture Ontology",
+  "id": "ont_10_culture",
+  "concepts": [
+    {
+      "qid": "Q5",
+      "label": "human",
+      "label_ja": "ヒト",
+      "label_wiki_ja": "ヒト"
+    },
+    {
+      "qid": "Q11042",
+      "label": "culture",
+      "label_ja": "文化",
+      "label_wiki_ja": "文化"
+    },
+    {
+      "qid": "Q735",
+      "label": "art",
+      "label_ja": "芸術",
+      "label_wiki_ja": "芸術"
+    },
+    {
+      "qid": "Q34770",
+      "label": "language",
+      "label_ja": "言語",
+      "label_wiki_ja": "言語"
+    },
+    {
+      "qid": "Q618123",
+      "label": "geographical feature",
+      "label_ja": "地理的特徴",
+      "label_wiki_ja": "地理的特徴"
+    },
+    {
+      "qid": "Q309",
+      "label": "history",
+      "label_ja": "歴史",
+      "label_wiki_ja": "歴史"
+    },
+    {
+      "qid": "Q9174",
+      "label": "religion",
+      "label_ja": "宗教",
+      "label_wiki_ja": "宗教"
+    },
+    {
+      "qid": "Q251777",
+      "label": "custom",
+      "label_ja": "風習",
+      "label_wiki_ja": "風習"
+    },
+    {
+      "qid": "Q82821",
+      "label": "tradition",
+      "label_ja": "伝統",
+      "label_wiki_ja": "伝統"
+    },
+    {
+      "qid": "Q2434238",
+      "label": "heritage",
+      "label_ja": "遺産",
+      "label_wiki_ja": "遺産"
+    },
+    {
+      "qid": "Q1778821",
+      "label": "cuisine",
+      "label_ja": "料理",
+      "label_wiki_ja": "独自料理"
+    },
+    {
+      "qid": "Q11639",
+      "label": "dance",
+      "label_ja": "舞踊",
+      "label_wiki_ja": "ダンス"
+    },
+    {
+      "qid": "Q41710",
+      "label": "ethnic group",
+      "label_ja": "民族",
+      "label_wiki_ja": "民族"
+    },
+    {
+      "qid": "Q8242",
+      "label": "literature",
+      "label_ja": "文学",
+      "label_wiki_ja": "文学"
+    },
+    {
+      "qid": "Q132241",
+      "label": "festival",
+      "label_ja": "祭",
+      "label_wiki_ja": "祭"
+    }
+  ],
+  "relations": [
+    {
+      "pid": "P172",
+      "label": "ethnic group",
+      "domain": "Q5",
+      "range": "Q41710",
+      "label_ja": "民族グループ",
+      "label_wiki_ja": "民族"
+    },
+    {
+      "pid": "P611",
+      "label": "religious order",
+      "domain": "Q9174",
+      "range": "Q9174",
+      "label_ja": "修道会（宗教団体）",
+      "label_wiki_ja": "包括団体"
+    },
+    {
+      "pid": "P1412",
+      "label": "languages spoken, written or signed",
+      "domain": "Q5",
+      "range": "Q34770",
+      "label_ja": "使用言語（話し言葉・書き言葉・手話）",
+      "label_wiki_ja": "使用可能言語"
+    },
+    {
+      "pid": "P571",
+      "label": "inception",
+      "domain": "Q8242",
+      "range": "",
+      "label_ja": "インセプション",
+      "label_wiki_ja": "成立日"
+    },
+    {
+      "pid": "P580",
+      "label": "start time",
+      "domain": "Q132241",
+      "range": "",
+      "label_ja": "開始時刻",
+      "label_wiki_ja": "開始日"
+    },
+    {
+      "pid": "P825",
+      "label": "dedicated to",
+      "domain": "Q735",
+      "range": "Q5",
+      "label_ja": "〜に捧げる（献呈先）",
+      "label_wiki_ja": "献呈先"
+    },
+    {
+      "pid": "P4185",
+      "label": "iconographic symbol",
+      "domain": "Q5",
+      "range": "",
+      "label_ja": "図像記号",
+      "label_wiki_ja": "図像学的象徴"
+    },
+    {
+      "pid": "P2341",
+      "label": "indigenous to",
+      "domain": "Q11639",
+      "range": "",
+      "label_ja": "固有の（原産地／自生地）",
+      "label_wiki_ja": "固有の地域・民族"
+    }
+  ]
+}

@@ -4,9 +4,9 @@ import sys
 # src モジュールへのパスを追加
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from pattern_parser import PatternParser
-from pattern_nodes import VariableNode
-from cky_table import CkyTable
+from pattern.pattern_parser import PatternParser
+from pattern.pattern_nodes import VariableNode
+from modules_core.cky_table import CkyTable
 
 
 def bunsetsu_pass(ast, i, j):

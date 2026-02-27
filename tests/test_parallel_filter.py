@@ -4,10 +4,10 @@ import sys
 # src モジュールへのパスを追加
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from pattern_parser import PatternParser
-from pattern_nodes import count_parallel_variables
-from cky_table import CkyTable
-from filter_settings import PARALLEL_KEYS
+from pattern.pattern_parser import PatternParser
+from pattern.pattern_nodes import count_parallel_variables
+from modules_core.cky_table import CkyTable
+from config.filter_settings import PARALLEL_KEYS
 
 
 def parallel_pass(par_cnt, clauses, i, j, keys):

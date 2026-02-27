@@ -21,3 +21,10 @@ pip install lark graphviz
 python src/main.py
 ```
 
+#### vLLM / LLM-jp の注意
+
+`src/main.py` は並列判定・オントロジー検証で vLLM(OpenAI互換API) にアクセスします。
+docker-compose 等で `LLMJP_*` / `LLMJP_ONTO_*` が正しく設定されていない場合、起動時に preflight で停止します。
+
+- preflight を無効化: `ONTOLOGY_VERIFY_PREFLIGHT=0`
+- LLM 失敗時に継続（非推奨）: `ONTOLOGY_VERIFY_STRICT=0`
